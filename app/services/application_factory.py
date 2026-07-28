@@ -10,6 +10,7 @@ from app.services.download_manager import DownloadManager
 from app.services.evolution_client import EvolutionClient
 from app.services.file_storage import FileStorage
 from app.services.message_pipeline import MessagePipeline
+from app.services.message_response_sender import MessageResponseSender
 from app.services.processing_queue import ProcessingQueue, ProcessingWorker
 from app.services.receive_media_use_case import ReceiveMediaUseCase
 from app.services.session_store import SQLiteSessionStore
@@ -76,6 +77,11 @@ def get_media_repository() -> InMemoryMediaRepository:
 @lru_cache(maxsize=1)
 def get_conversation_repository() -> InMemoryConversationRepository:
     return InMemoryConversationRepository()
+
+
+@lru_cache(maxsize=1)
+def get_message_response_sender() -> MessageResponseSender:
+    return MessageResponseSender(evolution_client=get_evolution_client())
 
 
 @lru_cache(maxsize=1)

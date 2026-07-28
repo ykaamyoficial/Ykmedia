@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     FILE_STORAGE_ROOT: str = "media"
     CONVERSATION_SESSION_TTL_SECONDS: float = 3600.0
     YOUTUBE_DOWNLOAD_TEMP_ROOT: str = "downloads/youtube"
+    FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"
 
     model_config = SettingsConfigDict(

@@ -45,7 +45,7 @@ def test_status_command_with_active_conversation() -> None:
 
     result = processor.process(_message("!status"))
 
-    assert "WAITING_CATEGORY" in result.response
+    assert "WAITING_USAGE_CONFIRMATION" in result.response
 
 
 def test_status_command_without_active_conversation() -> None:
@@ -94,5 +94,5 @@ def test_command_during_active_conversation_does_not_advance_state() -> None:
 
     session = engine.get_session("556299999999@s.whatsapp.net")
     assert session is not None
-    assert session.state is ConversationState.WAITING_CATEGORY
-    assert "WAITING_CATEGORY" in result.response
+    assert session.state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert "WAITING_USAGE_CONFIRMATION" in result.response

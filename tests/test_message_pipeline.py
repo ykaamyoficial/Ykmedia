@@ -138,13 +138,13 @@ def test_processes_text_message_without_download_or_storage() -> None:
     assert result.downloaded_media is None
     assert result.stored_file is None
     assert result.conversation_result is not None
-    assert result.conversation_result.next_state is ConversationState.WAITING_CATEGORY
+    assert result.conversation_result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.errors == []
     assert download_manager.calls == 0
     assert file_storage.calls == 0
 
 
-def test_processes_media_message_with_download_and_storage() -> None:
+def test_processes_media_message_with_download_without_storage() -> None:
     downloaded_media = _downloaded_media()
     stored_file = _stored_file()
     pipeline, download_manager, file_storage = _pipeline(
@@ -159,11 +159,11 @@ def test_processes_media_message_with_download_and_storage() -> None:
     assert result.received_message is not None
     assert result.received_message.media is not None
     assert result.downloaded_media == downloaded_media
-    assert result.stored_file == stored_file
+    assert result.stored_file is None
     assert result.conversation_result is not None
     assert result.errors == []
     assert download_manager.calls == 1
-    assert file_storage.calls == 1
+    assert file_storage.calls == 0
 
 
 def test_returns_error_for_invalid_message() -> None:
@@ -197,7 +197,7 @@ def test_records_download_failure_and_continues_to_conversation() -> None:
     assert file_storage.calls == 0
 
 
-def test_records_storage_failure_and_continues_to_conversation() -> None:
+def test_does_not_store_media_before_user_confirmation() -> None:
     downloaded_media = _downloaded_media()
     pipeline, download_manager, file_storage = _pipeline(
         download_result=downloaded_media,
@@ -211,9 +211,9 @@ def test_records_storage_failure_and_continues_to_conversation() -> None:
     assert result.downloaded_media == downloaded_media
     assert result.stored_file is None
     assert result.conversation_result is not None
-    assert result.errors == ["storage: falha storage"]
+    assert result.errors == []
     assert download_manager.calls == 1
-    assert file_storage.calls == 1
+    assert file_storage.calls == 0
 
 
 def test_full_flow_without_errors() -> None:
@@ -226,7 +226,7 @@ def test_full_flow_without_errors() -> None:
     assert result.received_message is not None
     assert result.processing_decision is not None
     assert result.downloaded_media is not None
-    assert result.stored_file is not None
+    assert result.stored_file is None
     assert result.conversation_result is not None
     assert result.errors == []
 
@@ -255,7 +255,7 @@ def test_command_message_does_not_enter_conversation_engine() -> None:
     assert conversation_engine.calls == 0
 
 
-def test_youtube_link_reuses_media_storage_flow() -> None:
+def test_youtube_link_reuses_media_download_flow() -> None:
     downloaded_media = DownloadedMedia(
         message_id="MSG1",
         content=b"video",
@@ -277,7 +277,39 @@ def test_youtube_link_reuses_media_storage_flow() -> None:
     )
 
     assert result.downloaded_media == downloaded_media
-    assert result.stored_file == _stored_file()
+    assert result.stored_file is None
     assert result.conversation_result is not None
     assert youtube_downloader.calls == 1
-    assert file_storage.calls == 1
+    assert file_storage.calls == 0
+
+
+def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
+    downloaded_media = DownloadedMedia(
+        message_id="MSG1",
+        content=b"video",
+        mimetype="video/mp4",
+        size_bytes=5,
+        file_name="youtube.mp4",
+    )
+    youtube_downloader = FakeYoutubeDownloader(downloaded_media)
+    conversation_engine = ConversationEngine(session_store=MemorySessionStore())
+    pipeline = MessagePipeline(
+        download_manager=FakeDownloadManager(_downloaded_media()),
+        file_storage=FakeFileStorage(_stored_file()),
+        conversation_engine=conversation_engine,
+        youtube_downloader=youtube_downloader,
+    )
+
+    asyncio.run(pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}})))
+    asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
+    asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
+    asyncio.run(pipeline.process_event(_payload({"conversation": "arquivo_antigo"})))
+    result = asyncio.run(
+        pipeline.process_event(_payload({"conversation": "https://youtu.be/abc"}))
+    )
+
+    assert result.downloaded_media == downloaded_media
+    assert result.conversation_result is not None
+    assert result.conversation_result.current_state is ConversationState.IDLE
+    assert result.conversation_result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert youtube_downloader.calls == 1

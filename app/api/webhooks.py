@@ -3,7 +3,11 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from app.core.config import settings
-from app.services.application_factory import get_receive_media_use_case
+from app.services.application_factory import (
+    get_message_response_sender,
+    get_receive_media_use_case,
+)
+from app.services.message_response_sender import MessageResponseSender
 from app.services.receive_media_use_case import ReceiveMediaUseCase
 
 logger = logging.getLogger(__name__)
@@ -15,6 +19,7 @@ async def evolution_webhook(
     request: Request,
     x_webhook_secret: str | None = Header(default=None),
     use_case: ReceiveMediaUseCase = Depends(get_receive_media_use_case),
+    response_sender: MessageResponseSender = Depends(get_message_response_sender),
 ) -> dict[str, object]:
     if settings.WEBHOOK_SECRET and x_webhook_secret != settings.WEBHOOK_SECRET:
         raise HTTPException(
@@ -28,6 +33,10 @@ async def evolution_webhook(
     if result.errors:
         logger.warning("Webhook Evolution processado com erros: %s", result.errors)
 
+    delivery_result = await response_sender.send_use_case_response(result)
+    if delivery_result.error is not None:
+        logger.warning("Falha ao enviar resposta pela Evolution: %s", delivery_result.error)
+
     return {
         "received": True,
         "processed": result.received_message is not None,
@@ -36,5 +45,6 @@ async def evolution_webhook(
         else None,
         "next_message": result.next_message,
         "has_file": result.stored_file is not None,
-        "has_errors": bool(result.errors),
+        "message_sent": delivery_result.sent,
+        "has_errors": bool(result.errors) or delivery_result.error is not None,
     }

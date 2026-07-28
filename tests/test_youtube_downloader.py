@@ -59,3 +59,28 @@ def test_simulated_download_returns_downloaded_media() -> None:
     assert result.content == b"video"
     assert result.mimetype == "video/mp4"
     assert result.file_name == "youtube.mp4"
+
+
+def test_download_options_prioritize_video_with_audio() -> None:
+    downloader = YoutubeDownloader()
+
+    options = downloader._build_download_options("%(title)s.%(ext)s")
+
+    assert "acodec!=none" in options["format"]
+    assert "vcodec!=none" in options["format"]
+    assert options["merge_output_format"] == "mp4"
+
+
+def test_resolves_merged_mp4_path(tmp_path: Path) -> None:
+    downloader = YoutubeDownloader()
+    prepared_path = tmp_path / "video.webm"
+    merged_path = tmp_path / "video.mp4"
+    merged_path.write_bytes(b"video-com-audio")
+
+    result = downloader._resolve_downloaded_path(
+        info={},
+        prepared_path=prepared_path,
+        temp_directory=tmp_path,
+    )
+
+    assert result == merged_path

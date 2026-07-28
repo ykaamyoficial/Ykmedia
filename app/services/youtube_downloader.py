@@ -21,6 +21,12 @@ class YoutubeDownloadError(YoutubeDownloaderError):
 
 
 class YoutubeDownloader:
+    _VIDEO_WITH_AUDIO_FORMAT = (
+        "best[ext=mp4][vcodec!=none][acodec!=none]/"
+        "best[vcodec!=none][acodec!=none]/"
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+        "bestvideo+bestaudio"
+    )
     _SUPPORTED_HOSTS = {
         "youtube.com",
         "www.youtube.com",
@@ -61,18 +67,18 @@ class YoutubeDownloader:
 
         self.temp_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=self.temp_root) as temp_directory:
-            output_template = str(Path(temp_directory) / "%(title).200B.%(ext)s")
-            options: dict[str, Any] = {
-                "outtmpl": output_template,
-                "format": "best[ext=mp4]/best",
-                "quiet": True,
-                "noplaylist": True,
-            }
+            temp_path = Path(temp_directory)
+            output_template = str(temp_path / "%(title).200B.%(ext)s")
+            options = self._build_download_options(output_template)
 
             try:
                 with YoutubeDL(options) as youtube_dl:
                     info = youtube_dl.extract_info(url, download=True)
-                    downloaded_path = Path(youtube_dl.prepare_filename(info))
+                    downloaded_path = self._resolve_downloaded_path(
+                        info=info,
+                        prepared_path=Path(youtube_dl.prepare_filename(info)),
+                        temp_directory=temp_path,
+                    )
             except Exception as exc:
                 raise YoutubeDownloadError("Falha ao baixar video do YouTube.") from exc
 
@@ -91,3 +97,49 @@ class YoutubeDownloader:
                 size_bytes=len(content),
                 file_name=downloaded_path.name,
             )
+
+    def _build_download_options(self, output_template: str) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "outtmpl": output_template,
+            "format": self._VIDEO_WITH_AUDIO_FORMAT,
+            "merge_output_format": "mp4",
+            "quiet": True,
+            "noplaylist": True,
+        }
+
+        if settings.FFMPEG_PATH:
+            options["ffmpeg_location"] = settings.FFMPEG_PATH
+
+        return options
+
+    def _resolve_downloaded_path(
+        self,
+        info: dict[str, Any],
+        prepared_path: Path,
+        temp_directory: Path,
+    ) -> Path:
+        candidates = [prepared_path, prepared_path.with_suffix(".mp4")]
+
+        requested_downloads = info.get("requested_downloads")
+        if isinstance(requested_downloads, list):
+            for download in requested_downloads:
+                if not isinstance(download, dict):
+                    continue
+
+                filepath = download.get("filepath") or download.get("_filename")
+                if isinstance(filepath, str):
+                    candidates.append(Path(filepath))
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+        downloaded_files = sorted(
+            (path for path in temp_directory.iterdir() if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if downloaded_files:
+            return downloaded_files[0]
+
+        return prepared_path

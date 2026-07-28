@@ -1,7 +1,12 @@
 from pathlib import Path
 
+from app.models.message import MessageType, ReceivedMessage, Sender
 from app.services.category_service import CategoryService
-from app.services.conversation_engine import ConversationSession, ConversationState
+from app.services.conversation_engine import (
+    ConversationEngine,
+    ConversationSession,
+    ConversationState,
+)
 from app.services.processing_queue import ProcessingJobOrigin, ProcessingQueue
 from app.services.session_store import SQLiteSessionStore
 from app.services.storage_service import StorageService
@@ -96,6 +101,28 @@ def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
     assert restored_session is not None
     assert restored_session.state is ConversationState.WAITING_FILENAME
     assert restored_session.category == "Louvores"
+
+
+def test_conversation_engine_persists_state_changes_with_sqlite_store(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    storage = StorageService(database_path=database_path)
+    session_store = SQLiteSessionStore(storage_service=storage)
+    engine = ConversationEngine(session_store=session_store)
+    message = ReceivedMessage(
+        message_id="msg-1",
+        sender=Sender(remote_jid="sender-1"),
+        message_type=MessageType.IMAGE,
+        raw_type="imageMessage",
+    )
+
+    result = engine.handle(message)
+
+    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    persisted_session = SQLiteSessionStore(
+        storage_service=StorageService(database_path=database_path)
+    ).get("sender-1")
+    assert persisted_session is not None
+    assert persisted_session.state is ConversationState.WAITING_USAGE_CONFIRMATION
 
 
 def test_removes_expired_persisted_conversation_sessions(tmp_path: Path) -> None:

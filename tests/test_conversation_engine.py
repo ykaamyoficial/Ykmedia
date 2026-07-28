@@ -20,18 +20,21 @@ def test_starts_conversation() -> None:
     result = engine.handle(_message())
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_CATEGORY
+    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.is_finished is False
-    assert "classifica" in result.suggested_response
+    assert "sonoplastia" in result.suggested_response
 
 
 def test_transitions_between_states() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
     engine.handle(_message())
+    confirmation_result = engine.handle(_message("1"))
     category_result = engine.handle(_message("1"))
     filename_result = engine.handle(_message("louvor"))
 
+    assert confirmation_result.current_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert confirmation_result.next_state is ConversationState.WAITING_CATEGORY
     assert category_result.current_state is ConversationState.WAITING_CATEGORY
     assert category_result.next_state is ConversationState.WAITING_FILENAME
     assert filename_result.current_state is ConversationState.WAITING_FILENAME
@@ -43,6 +46,7 @@ def test_keeps_state_on_invalid_category_response() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
     engine.handle(_message())
+    engine.handle(_message("1"))
     result = engine.handle(_message("9"))
 
     assert result.current_state is ConversationState.WAITING_CATEGORY
@@ -55,6 +59,7 @@ def test_finishes_flow() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
     engine.handle(_message())
+    engine.handle(_message("1"))
     engine.handle(_message("1"))
     result = engine.handle(_message("louvor"))
 
@@ -69,24 +74,38 @@ def test_restarts_conversation_after_reset() -> None:
 
     engine.handle(_message(remote_jid=remote_jid))
     engine.handle(_message("1", remote_jid=remote_jid))
+    engine.handle(_message("1", remote_jid=remote_jid))
     engine.reset(remote_jid)
     result = engine.handle(_message(remote_jid=remote_jid))
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_CATEGORY
+    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
 
 
-def test_keeps_finished_flow_finished() -> None:
+def test_starts_new_flow_when_new_media_arrives_after_finished_flow() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
     engine.handle(_message())
     engine.handle(_message("1"))
+    engine.handle(_message("1"))
     engine.handle(_message("louvor"))
-    result = engine.handle(_message("qualquer"))
+    result = engine.handle(_message())
 
-    assert result.current_state is ConversationState.FINISHED
+    assert result.current_state is ConversationState.IDLE
+    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert result.is_finished is False
+
+
+def test_cancels_when_usage_is_rejected() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message())
+    result = engine.handle(_message("2"))
+
+    assert result.current_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.next_state is ConversationState.FINISHED
     assert result.is_finished is True
+    assert "nao sera enviado" in result.suggested_response
 
 
 def test_uses_dynamic_categories() -> None:
@@ -97,10 +116,12 @@ def test_uses_dynamic_categories() -> None:
     )
 
     start_result = engine.handle(_message())
+    confirmation_result = engine.handle(_message("1"))
     category_result = engine.handle(_message("2"))
     session = engine.get_session("556299999999@s.whatsapp.net")
 
-    assert "1 Eventos, 2 Ensaios" in start_result.suggested_response
+    assert "sonoplastia" in start_result.suggested_response
+    assert "1 Eventos, 2 Ensaios" in confirmation_result.suggested_response
     assert category_result.next_state is ConversationState.WAITING_FILENAME
     assert session is not None
     assert session.category == "Ensaios"

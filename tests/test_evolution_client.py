@@ -107,6 +107,124 @@ def test_download_media_returns_decoded_media() -> None:
     assert result.file_name == "audio.ogg"
 
 
+def test_send_text_message_uses_official_endpoint_and_payload() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.read().decode()
+        return httpx.Response(
+            status_code=200,
+            json={"status": "PENDING"},
+            request=request,
+        )
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(
+        client.send_text_message(
+            recipient="556299999999@s.whatsapp.net",
+            text="Recebi seu arquivo.",
+        )
+    )
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/message/sendText/ykmedia"
+    assert captured_request["json"] == (
+        '{"number":"556299999999","text":"Recebi seu arquivo."}'
+    )
+    assert result == {"status": "PENDING"}
+
+
+def test_send_text_message_rejects_empty_text() -> None:
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(status_code=200, json={}, request=request)
+        ),
+    )
+
+    with pytest.raises(EvolutionInvalidResponseError):
+        asyncio.run(client.send_text_message("556299999999@s.whatsapp.net", " "))
+
+
+def test_connect_instance_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        return httpx.Response(
+            status_code=200,
+            json={"qrcode": {"base64": "data:image/png;base64,abc"}},
+            request=request,
+        )
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.connect_instance())
+
+    assert captured_request["method"] == "GET"
+    assert captured_request["url_path"] == "/instance/connect/ykmedia"
+    assert result == {"qrcode": {"base64": "data:image/png;base64,abc"}}
+
+
+def test_get_connection_state_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        return httpx.Response(
+            status_code=200,
+            json={"instance": {"state": "open"}},
+            request=request,
+        )
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.get_connection_state())
+
+    assert captured_request["method"] == "GET"
+    assert captured_request["url_path"] == "/instance/connectionState/ykmedia"
+    assert result == {"instance": {"state": "open"}}
+
+
+def test_logout_instance_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        return httpx.Response(status_code=200, json={"status": "SUCCESS"}, request=request)
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.logout_instance())
+
+    assert captured_request["method"] == "DELETE"
+    assert captured_request["url_path"] == "/instance/logout/ykmedia"
+    assert result == {"status": "SUCCESS"}
+
+
 def test_download_media_raises_invalid_response_when_base64_is_missing() -> None:
     client = EvolutionClient(
         base_url="http://evolution.test",

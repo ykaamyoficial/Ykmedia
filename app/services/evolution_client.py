@@ -46,6 +46,41 @@ class EvolutionClient:
     async def health(self) -> dict[str, Any]:
         return await self._request_json("GET", "")
 
+    async def send_text_message(self, recipient: str, text: str) -> dict[str, Any]:
+        normalized_recipient = self._normalize_recipient(recipient)
+        normalized_text = text.strip()
+        if not normalized_recipient:
+            raise EvolutionInvalidResponseError("Cannot send a text message without a recipient.")
+        if not normalized_text:
+            raise EvolutionInvalidResponseError("Cannot send an empty text message.")
+
+        return await self._request_json(
+            "POST",
+            f"/message/sendText/{settings.EVOLUTION_INSTANCE}",
+            json={
+                "number": normalized_recipient,
+                "text": normalized_text,
+            },
+        )
+
+    async def connect_instance(self) -> dict[str, Any]:
+        return await self._request_json(
+            "GET",
+            f"/instance/connect/{settings.EVOLUTION_INSTANCE}",
+        )
+
+    async def get_connection_state(self) -> dict[str, Any]:
+        return await self._request_json(
+            "GET",
+            f"/instance/connectionState/{settings.EVOLUTION_INSTANCE}",
+        )
+
+    async def logout_instance(self) -> dict[str, Any]:
+        return await self._request_json(
+            "DELETE",
+            f"/instance/logout/{settings.EVOLUTION_INSTANCE}",
+        )
+
     async def download_media(self, message: ReceivedMessage) -> DownloadedMedia:
         if message.media is None:
             raise EvolutionInvalidResponseError("Cannot download media from a message without media metadata.")
@@ -133,3 +168,10 @@ class EvolutionClient:
             return self.base_url
 
         return f"{self.base_url}/{normalized_path}"
+
+    def _normalize_recipient(self, recipient: str) -> str:
+        value = recipient.strip()
+        if "@" in value:
+            value = value.split("@", 1)[0]
+
+        return "".join(character for character in value if character.isdigit())

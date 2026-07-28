@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
+from dataclasses import replace
 from typing import Any, Callable, Protocol
 
 from app.models.download import DownloadedMedia
-from app.models.message import ReceivedMessage
+from app.models.message import MessageType, ReceivedMessage
 from app.models.storage import StoredFile
 from app.services.command_processor import CommandProcessor, CommandResult
 from app.services.conversation_engine import ConversationResult
@@ -129,29 +130,25 @@ class MessagePipeline:
         decision = self._message_processor(message)
         downloaded_media: DownloadedMedia | None = None
         stored_file: StoredFile | None = None
+        downloaded_from_youtube = False
 
         if message.media is not None:
             try:
                 downloaded_media = await self._download_manager.download(message)
             except Exception as exc:
                 errors.append(self._format_error("download", exc))
-            else:
-                try:
-                    stored_file = self._file_storage.save(downloaded_media)
-                except Exception as exc:
-                    errors.append(self._format_error("storage", exc))
         elif self._has_youtube_link(message):
             try:
                 downloaded_media = await self._youtube_downloader.download(message)
+                downloaded_from_youtube = True
             except Exception as exc:
                 errors.append(self._format_error("youtube", exc))
-            else:
-                try:
-                    stored_file = self._file_storage.save(downloaded_media)
-                except Exception as exc:
-                    errors.append(self._format_error("storage", exc))
 
-        conversation_result = self._conversation_engine.handle(message)
+        conversation_message = self._message_for_conversation(
+            message=message,
+            downloaded_from_youtube=downloaded_from_youtube,
+        )
+        conversation_result = self._conversation_engine.handle(conversation_message)
 
         return PipelineResult(
             received_message=message,
@@ -179,6 +176,20 @@ class MessagePipeline:
         return (
             self._youtube_downloader is not None
             and self._youtube_downloader.extract_url(message.text) is not None
+        )
+
+    def _message_for_conversation(
+        self,
+        message: ReceivedMessage,
+        downloaded_from_youtube: bool,
+    ) -> ReceivedMessage:
+        if not downloaded_from_youtube:
+            return message
+
+        return replace(
+            message,
+            message_type=MessageType.VIDEO,
+            raw_type="youtubeMessage",
         )
 
     def _detect_origin(self, payload: dict[str, Any]) -> ProcessingJobOrigin:

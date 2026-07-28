@@ -89,12 +89,13 @@ def _use_case(
     download_result: DownloadedMedia | Exception | None = None,
     storage_result: StoredFile | Exception | None = None,
 ) -> ReceiveMediaUseCase:
+    file_storage = FakeFileStorage(storage_result or _stored_file())
     pipeline = MessagePipeline(
         download_manager=FakeDownloadManager(download_result or _downloaded_media()),
-        file_storage=FakeFileStorage(storage_result or _stored_file()),
+        file_storage=file_storage,
         conversation_engine=ConversationEngine(session_store=MemorySessionStore()),
     )
-    return ReceiveMediaUseCase(pipeline)
+    return ReceiveMediaUseCase(pipeline, file_storage=file_storage)  # type: ignore[arg-type]
 
 
 def test_receives_image() -> None:
@@ -104,10 +105,10 @@ def test_receives_image() -> None:
 
     assert result.received_message is not None
     assert result.received_message.message_type is MessageType.IMAGE
-    assert result.stored_file is not None
-    assert result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert result.stored_file is None
+    assert result.conversation_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.next_message is not None
-    assert "classifica" in result.next_message
+    assert "sonoplastia" in result.next_message
     assert result.errors == []
 
 
@@ -118,7 +119,7 @@ def test_receives_audio() -> None:
 
     assert result.received_message is not None
     assert result.received_message.message_type is MessageType.AUDIO
-    assert result.stored_file is not None
+    assert result.stored_file is None
     assert result.errors == []
 
 
@@ -129,7 +130,7 @@ def test_receives_video() -> None:
 
     assert result.received_message is not None
     assert result.received_message.message_type is MessageType.VIDEO
-    assert result.stored_file is not None
+    assert result.stored_file is None
     assert result.errors == []
 
 
@@ -142,7 +143,7 @@ def test_receives_document() -> None:
 
     assert result.received_message is not None
     assert result.received_message.message_type is MessageType.DOCUMENT
-    assert result.stored_file is not None
+    assert result.stored_file is None
     assert result.errors == []
 
 
@@ -154,7 +155,7 @@ def test_receives_text_without_file() -> None:
     assert result.received_message is not None
     assert result.received_message.message_type is MessageType.TEXT
     assert result.stored_file is None
-    assert result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert result.conversation_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.next_message is not None
     assert result.errors == []
 
@@ -166,17 +167,18 @@ def test_reports_download_failure() -> None:
 
     assert result.received_message is not None
     assert result.stored_file is None
-    assert result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert result.conversation_state is ConversationState.WAITING_USAGE_CONFIRMATION
     assert result.errors == ["download: falha download"]
 
 
-def test_reports_storage_failure() -> None:
+def test_reports_storage_failure_after_usage_confirmation() -> None:
     use_case = _use_case(
         download_result=_downloaded_media("image/jpeg"),
         storage_result=FileWriteError("falha gravacao"),
     )
 
-    result = asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}})))
+    asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}})))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "1"})))
 
     assert result.received_message is not None
     assert result.stored_file is None
@@ -214,10 +216,14 @@ def test_complete_conversation_flow_renames_saved_image(tmp_path: Path) -> None:
     first_result = asyncio.run(
         use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}))
     )
+    confirmation_result = asyncio.run(use_case.execute(_payload({"conversation": "1"})))
     category_result = asyncio.run(use_case.execute(_payload({"conversation": "3"})))
     filename_result = asyncio.run(use_case.execute(_payload({"conversation": "foto_culto"})))
 
-    assert first_result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert first_result.conversation_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert first_result.stored_file is None
+    assert confirmation_result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert confirmation_result.stored_file is not None
     assert category_result.conversation_state is ConversationState.WAITING_FILENAME
     assert filename_result.conversation_state is ConversationState.FINISHED
     assert filename_result.stored_file is not None
@@ -244,6 +250,7 @@ def test_category_defines_destination_folder_automatically(tmp_path: Path) -> No
     )
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}})))
+    asyncio.run(use_case.execute(_payload({"conversation": "1"})))
     asyncio.run(use_case.execute(_payload({"conversation": "1"})))
     result = asyncio.run(use_case.execute(_payload({"conversation": "louvor_especial"})))
 
@@ -287,12 +294,38 @@ def test_youtube_complete_flow_reuses_existing_media_flow(tmp_path: Path) -> Non
     )
 
     first_result = asyncio.run(use_case.execute(_payload({"conversation": "https://youtu.be/abc"})))
+    confirmation_result = asyncio.run(use_case.execute(_payload({"conversation": "1"})))
     category_result = asyncio.run(use_case.execute(_payload({"conversation": "3"})))
     filename_result = asyncio.run(use_case.execute(_payload({"conversation": "video_culto"})))
 
-    assert first_result.conversation_state is ConversationState.WAITING_CATEGORY
+    assert first_result.conversation_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert confirmation_result.conversation_state is ConversationState.WAITING_CATEGORY
     assert category_result.conversation_state is ConversationState.WAITING_FILENAME
     assert filename_result.conversation_state is ConversationState.FINISHED
     assert filename_result.stored_file is not None
     assert Path(filename_result.stored_file.relative_path) == Path("Jovens") / "video_culto.bin"
     assert filename_result.errors == []
+
+
+def test_does_not_report_success_when_pending_file_is_missing() -> None:
+    media_repository = InMemoryMediaRepository()
+    file_storage = FileStorage()
+    conversation_engine = ConversationEngine(session_store=MemorySessionStore())
+    pipeline = MessagePipeline(
+        download_manager=FakeDownloadManager(_downloaded_media("image/jpeg")),
+        file_storage=file_storage,
+        conversation_engine=conversation_engine,
+    )
+    use_case = ReceiveMediaUseCase(
+        message_pipeline=pipeline,
+        media_repository=media_repository,
+        file_storage=file_storage,
+    )
+
+    asyncio.run(use_case.execute(_payload({"conversation": "texto sem arquivo"})))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "1"})))
+
+    assert result.stored_file is None
+    assert result.errors == ["storage: arquivo pendente nao encontrado para confirmar."]
+    assert result.next_message is not None
+    assert "Envie o arquivo novamente" in result.next_message

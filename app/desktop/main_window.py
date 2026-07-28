@@ -1,10 +1,14 @@
 from collections.abc import Callable
+import base64
+from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGraphicsOpacityEffect,
@@ -15,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -27,9 +32,13 @@ from PySide6.QtWidgets import (
 from app.desktop.data_provider import DesktopDataProvider
 from app.services.application_factory import (
     get_category_service,
+    get_evolution_client,
     get_processing_queue,
     get_storage_service,
 )
+
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+APP_ICON_PATH = ASSETS_DIR / "ykmedia.ico"
 
 
 class YkMediaMainWindow(QMainWindow):
@@ -39,10 +48,14 @@ class YkMediaMainWindow(QMainWindow):
             storage_service=get_storage_service(),
             processing_queue=get_processing_queue(),
             category_service=get_category_service(),
+            evolution_client=get_evolution_client(),
         )
         self.setWindowTitle("YkMedia")
+        if APP_ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.resize(1440, 880)
         self._animations: list[QPropertyAnimation] = []
+        self._conversation_rows: list[dict[str, str]] = []
 
         self.pages: dict[str, QWidget] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
@@ -90,19 +103,20 @@ class YkMediaMainWindow(QMainWindow):
         layout.addWidget(version)
         layout.addSpacing(18)
 
-        items = [
-            ("Dashboard", "▦"),
-            ("Fila", "☷"),
-            ("Historico", "◷"),
-            ("Conversas", "◌"),
-            ("Categorias", "◇"),
-            ("Configuracoes", "⚙"),
-            ("Logs", "≡"),
-            ("Sobre", "ⓘ"),
-        ]
+        icon_map = {
+            "Dashboard": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_ComputerIcon),
+            "Fila": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_FileDialogDetailedView),
+            "Historico": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_FileDialogContentsView),
+            "Conversas": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_MessageBoxInformation),
+            "Categorias": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DirIcon),
+            "Configuracoes": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_FileDialogInfoView),
+            "Logs": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_FileIcon),
+            "Sobre": QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DialogHelpButton),
+        }
 
-        for name, icon in items:
-            button = QPushButton(f"{icon}  {name}")
+        for name, icon in icon_map.items():
+            button = QPushButton(name)
+            button.setIcon(icon)
             button.setObjectName("nav_button")
             button.setCheckable(True)
             button.clicked.connect(lambda checked=False, page=name: self._select_page(page))
@@ -110,7 +124,7 @@ class YkMediaMainWindow(QMainWindow):
             layout.addWidget(button)
 
         layout.addStretch()
-        footer = QLabel("SQLite local\nFila em memoria persistida")
+        footer = QLabel("SQLite local\nFila persistida")
         footer.setObjectName("sidebar_footer")
         layout.addWidget(footer)
         return sidebar
@@ -155,9 +169,19 @@ class YkMediaMainWindow(QMainWindow):
         layout.addLayout(title_block)
         layout.addStretch()
 
+        refresh_button = QPushButton("Atualizar")
+        refresh_button.clicked.connect(self.refresh_all)
+        media_button = QPushButton("Abrir midias")
+        media_button.clicked.connect(self._open_media_root)
+        logs_button = QPushButton("Abrir logs")
+        logs_button.clicked.connect(self._open_logs_directory)
+        layout.addWidget(refresh_button)
+        layout.addWidget(media_button)
+        layout.addWidget(logs_button)
+
         self.header_indicators: dict[str, QLabel] = {}
         for key, text in {
-            "system": "● Sistema Online",
+            "system": "Sistema Online",
             "worker": "Worker",
             "evolution": "Evolution",
             "sqlite": "SQLite",
@@ -191,10 +215,14 @@ class YkMediaMainWindow(QMainWindow):
         layout.addLayout(cards)
 
         charts = QGridLayout()
-        charts.addWidget(self._placeholder_panel("Grafico de atividade", "Atividade por hora"), 0, 0)
-        charts.addWidget(self._placeholder_panel("Grafico de processamento", "Pendentes x concluidos"), 0, 1)
-        charts.addWidget(self._placeholder_panel("Uso do disco", "Espaco usado pela pasta media"), 1, 0)
-        charts.addWidget(self._placeholder_panel("Tempo medio", "Tempo medio por processamento"), 1, 1)
+        self.activity_panel = self._placeholder_panel("Grafico de atividade", "Eventos recentes por status")
+        self.processing_panel = self._placeholder_panel("Grafico de processamento", "Resumo da fila atual")
+        self.disk_panel = self._placeholder_panel("Uso do disco", "Pasta media pronta para organizacao")
+        self.average_panel = self._placeholder_panel("Tempo medio", "Tempo medio sera calculado pelo historico")
+        charts.addWidget(self.activity_panel, 0, 0)
+        charts.addWidget(self.processing_panel, 0, 1)
+        charts.addWidget(self.disk_panel, 1, 0)
+        charts.addWidget(self.average_panel, 1, 1)
         layout.addLayout(charts, 1)
         return page
 
@@ -204,8 +232,10 @@ class YkMediaMainWindow(QMainWindow):
         toolbar = self._toolbar()
         self.queue_search = QLineEdit()
         self.queue_search.setPlaceholderText("Pesquisar fila")
+        self.queue_search.textChanged.connect(self.refresh_queue)
         self.queue_filter = QComboBox()
         self.queue_filter.addItems(["Todos", "PENDENTE", "PROCESSANDO", "CONCLUIDO", "ERRO"])
+        self.queue_filter.currentTextChanged.connect(self.refresh_queue)
         refresh_button = QPushButton("Atualizar")
         refresh_button.clicked.connect(self.refresh_queue)
         clear_button = QPushButton("Limpar concluidos")
@@ -228,23 +258,34 @@ class YkMediaMainWindow(QMainWindow):
         self.history_search.textChanged.connect(self.refresh_history)
         self.history_filter = QComboBox()
         self.history_filter.addItems(["Todos", "Louvores", "Mensagens", "Jovens", "Criancas", "Outros"])
+        self.history_filter.currentTextChanged.connect(self.refresh_history)
         self.pagination_label = QLabel("Pagina 1")
+        open_media_button = QPushButton("Abrir midias")
+        open_media_button.clicked.connect(self._open_media_root)
         toolbar.addWidget(self.history_search)
         toolbar.addWidget(self.history_filter)
         toolbar.addWidget(self.pagination_label)
+        toolbar.addWidget(open_media_button)
         layout.addLayout(toolbar)
         self.history_table = self._create_table(["Data", "Remetente", "Categoria", "Nome final", "Caminho"])
+        self.history_table.itemDoubleClicked.connect(lambda item: self._open_media_root())
         layout.addWidget(self.history_table)
         return page
 
     def _build_conversations_page(self) -> QWidget:
         page = QWidget()
         layout = QHBoxLayout(page)
+        left_panel = QVBoxLayout()
         self.conversations_list = QListWidget()
-        self.conversations_list.setFixedWidth(320)
+        self.conversations_list.setFixedWidth(330)
+        self.conversations_list.currentRowChanged.connect(self._show_conversation_details)
+        cancel_button = QPushButton("Cancelar conversa")
+        cancel_button.clicked.connect(self._cancel_selected_conversation)
+        left_panel.addWidget(self.conversations_list)
+        left_panel.addWidget(cancel_button)
         self.conversation_details = QTextEdit()
         self.conversation_details.setReadOnly(True)
-        layout.addWidget(self.conversations_list)
+        layout.addLayout(left_panel)
         layout.addWidget(self.conversation_details, 1)
         return page
 
@@ -273,18 +314,67 @@ class YkMediaMainWindow(QMainWindow):
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
-        layout = QGridLayout(page)
+        layout = QVBoxLayout(page)
+        grid = QGridLayout()
+        self.environment_input = QLineEdit("development")
         self.downloads_root_input = QLineEdit()
         self.ffmpeg_path_input = QLineEdit()
         self.sqlite_database_input = QLineEdit()
         self.youtube_temp_input = QLineEdit()
         self.whatsapp_instance_input = QLineEdit("ykmedia")
-        layout.addWidget(self._settings_group("Geral", [("Ambiente", QLineEdit("development"))]), 0, 0)
-        layout.addWidget(self._settings_group("Downloads", [("Pasta raiz", self.downloads_root_input)]), 0, 1)
-        layout.addWidget(self._settings_group("SQLite", [("Banco SQLite", self.sqlite_database_input)]), 1, 0)
-        layout.addWidget(self._settings_group("FFmpeg", [("Caminho do FFmpeg", self.ffmpeg_path_input)]), 1, 1)
-        layout.addWidget(self._settings_group("YouTube", [("Downloads temporarios", self.youtube_temp_input)]), 2, 0)
-        layout.addWidget(self._settings_group("WhatsApp", [("Instancia Evolution", self.whatsapp_instance_input)]), 2, 1)
+        self.evolution_state_label = QLabel("Desconhecida")
+        self.evolution_qrcode_label = QLabel("Clique em Gerar QR Code para conectar uma nova sessao.")
+        self.evolution_qrcode_label.setObjectName("qr_placeholder")
+        self.evolution_qrcode_label.setFixedSize(260, 260)
+        self.evolution_qrcode_label.setWordWrap(True)
+        self.evolution_qrcode_label.setScaledContents(True)
+        grid.addWidget(self._settings_group("Geral", [("Ambiente", self.environment_input)]), 0, 0)
+        grid.addWidget(self._settings_group("Downloads", [("Pasta raiz", self.downloads_root_input)]), 0, 1)
+        grid.addWidget(self._settings_group("SQLite", [("Banco SQLite", self.sqlite_database_input)]), 1, 0)
+        grid.addWidget(self._settings_group("FFmpeg", [("Caminho do FFmpeg", self.ffmpeg_path_input)]), 1, 1)
+        grid.addWidget(self._settings_group("YouTube", [("Downloads temporarios", self.youtube_temp_input)]), 2, 0)
+        grid.addWidget(
+            self._settings_group(
+                "WhatsApp",
+                [
+                    ("Instancia Evolution", self.whatsapp_instance_input),
+                    ("Estado da sessao", self.evolution_state_label),
+                ],
+            ),
+            2,
+            1,
+        )
+        actions = self._toolbar()
+        browse_downloads = QPushButton("Escolher pasta de midias")
+        browse_downloads.clicked.connect(self._choose_downloads_root)
+        browse_database = QPushButton("Escolher banco")
+        browse_database.clicked.connect(self._choose_sqlite_database)
+        browse_ffmpeg = QPushButton("Escolher FFmpeg")
+        browse_ffmpeg.clicked.connect(self._choose_ffmpeg_path)
+        save_button = QPushButton("Salvar configuracoes")
+        save_button.clicked.connect(self._save_settings)
+        actions.addWidget(browse_downloads)
+        actions.addWidget(browse_database)
+        actions.addWidget(browse_ffmpeg)
+        actions.addWidget(save_button)
+        whatsapp_actions = self._toolbar()
+        check_session_button = QPushButton("Verificar sessao")
+        check_session_button.clicked.connect(self._refresh_evolution_session)
+        connect_session_button = QPushButton("Gerar QR Code")
+        connect_session_button.clicked.connect(self._connect_evolution_session)
+        reconnect_session_button = QPushButton("Reconectar com novo QR")
+        reconnect_session_button.clicked.connect(self._reconnect_evolution_session)
+        disconnect_session_button = QPushButton("Desconectar sessao")
+        disconnect_session_button.clicked.connect(self._disconnect_evolution_session)
+        whatsapp_actions.addWidget(check_session_button)
+        whatsapp_actions.addWidget(connect_session_button)
+        whatsapp_actions.addWidget(reconnect_session_button)
+        whatsapp_actions.addWidget(disconnect_session_button)
+        layout.addLayout(grid)
+        layout.addLayout(actions)
+        layout.addLayout(whatsapp_actions)
+        layout.addWidget(self.evolution_qrcode_label)
+        layout.addStretch()
         return page
 
     def _build_logs_page(self) -> QWidget:
@@ -293,12 +383,18 @@ class YkMediaMainWindow(QMainWindow):
         toolbar = self._toolbar()
         self.logs_search = QLineEdit()
         self.logs_search.setPlaceholderText("Pesquisar logs")
+        self.logs_search.textChanged.connect(self.refresh_logs)
         self.logs_filter = QComboBox()
-        self.logs_filter.addItems(["INFO", "WARNING", "ERROR"])
+        self.logs_filter.addItems(["Todos", "INFO", "WARNING", "ERROR"])
+        self.logs_filter.currentTextChanged.connect(self.refresh_logs)
         export_button = QPushButton("Exportar")
+        export_button.clicked.connect(self._export_logs)
+        open_logs_button = QPushButton("Abrir pasta")
+        open_logs_button.clicked.connect(self._open_logs_directory)
         toolbar.addWidget(self.logs_search)
         toolbar.addWidget(self.logs_filter)
         toolbar.addWidget(export_button)
+        toolbar.addWidget(open_logs_button)
         self.logs_table = self._create_table(["Data/Hora", "Nivel", "Mensagem"])
         layout.addLayout(toolbar)
         layout.addWidget(self.logs_table)
@@ -332,8 +428,10 @@ class YkMediaMainWindow(QMainWindow):
         self.metric_labels["pending_jobs"].setText(str(snapshot.pending_jobs))
         self.metric_labels["completed_jobs"].setText(str(snapshot.completed_jobs))
         self.metric_labels["error_jobs"].setText(str(snapshot.error_jobs))
+        self.header_indicators["system"].setText(snapshot.system_status)
         self.header_indicators["worker"].setText(f"Worker {snapshot.worker_status}")
         self.header_indicators["evolution"].setText(f"Evolution {snapshot.evolution_status}")
+        self.header_indicators["sqlite"].setText("SQLite Local")
 
     def refresh_queue(self) -> None:
         rows = self.data_provider.list_jobs()
@@ -350,21 +448,31 @@ class YkMediaMainWindow(QMainWindow):
         category = self.history_filter.currentText()
         if category != "Todos":
             rows = [row for row in rows if row["category"] == category]
+        self.pagination_label.setText(f"{len(rows)} registros")
         self._fill_table(self.history_table, rows, ["date", "sender", "category", "final_name", "file_path"])
 
     def refresh_conversations(self) -> None:
+        current_row = max(self.conversations_list.currentRow(), 0)
+        self._conversation_rows = self.data_provider.list_conversations()
+        self.conversations_list.blockSignals(True)
         self.conversations_list.clear()
-        conversations = self.data_provider.list_conversations()
-        for conversation in conversations:
+        for conversation in self._conversation_rows:
             self.conversations_list.addItem(f"{conversation['sender']}  {conversation['state']}")
-        details = conversations[0] if conversations else None
-        self.conversation_details.setText(
-            "\n".join(f"{key}: {value}" for key, value in details.items()) if details else "Nenhuma conversa ativa."
-        )
+        if self._conversation_rows:
+            self.conversations_list.setCurrentRow(min(current_row, len(self._conversation_rows) - 1))
+        self.conversations_list.blockSignals(False)
+        self._show_conversation_details(self.conversations_list.currentRow())
 
     def refresh_categories(self) -> None:
-        if self.categories_list.count() == 0:
-            self.categories_list.addItems(self.data_provider.get_settings_snapshot().categories)
+        selected = self.categories_list.currentRow()
+        categories = self.data_provider.get_settings_snapshot().categories
+        self.categories_list.blockSignals(True)
+        self.categories_list.clear()
+        self.categories_list.addItems(categories)
+        if self.categories_list.count() > 0:
+            self.categories_list.setCurrentRow(min(max(selected, 0), self.categories_list.count() - 1))
+        self.categories_list.blockSignals(False)
+        self._refresh_history_categories_filter(categories)
 
     def refresh_settings(self) -> None:
         snapshot = self.data_provider.get_settings_snapshot()
@@ -374,9 +482,16 @@ class YkMediaMainWindow(QMainWindow):
             self.sqlite_database_input.setText(snapshot.sqlite_database)
         if not self.ffmpeg_path_input.text():
             self.ffmpeg_path_input.setText(snapshot.ffmpeg_path)
+        if not self.youtube_temp_input.text():
+            self.youtube_temp_input.setText("downloads/youtube")
+        self._refresh_evolution_session(show_message=False)
 
     def refresh_logs(self) -> None:
-        self._fill_table(self.logs_table, self.data_provider.list_logs(), ["date", "level", "message"])
+        rows = self.data_provider.list_logs(
+            search_text=self.logs_search.text(),
+            level=self.logs_filter.currentText(),
+        )
+        self._fill_table(self.logs_table, rows, ["date", "level", "message"])
 
     def _select_page(self, name: str) -> None:
         for page_name, button in self.nav_buttons.items():
@@ -398,9 +513,38 @@ class YkMediaMainWindow(QMainWindow):
         self._animations.append(animation)
 
     def _clear_completed_jobs(self) -> None:
-        self.data_provider.clear_completed_jobs()
+        deleted = self.data_provider.clear_completed_jobs()
         self.refresh_queue()
         self.refresh_dashboard()
+        self._show_info("Fila", f"{deleted} trabalho(s) concluido(s) removido(s).")
+
+    def _show_conversation_details(self, row: int) -> None:
+        if row < 0 or row >= len(self._conversation_rows):
+            self.conversation_details.setText("Nenhuma conversa ativa.")
+            return
+        details = self._conversation_rows[row]
+        self.conversation_details.setText(
+            "\n".join(
+                [
+                    f"Telefone: {details['telefone']}",
+                    f"Status: {details['status']}",
+                    f"Categoria: {details['categoria']}",
+                    f"Arquivo recebido: {details['arquivo recebido']}",
+                    f"Etapa atual: {details['etapa atual']}",
+                    f"Tempo de espera: {details['tempo de espera']}",
+                ]
+            )
+        )
+
+    def _cancel_selected_conversation(self) -> None:
+        row = self.conversations_list.currentRow()
+        if row < 0 or row >= len(self._conversation_rows):
+            self._show_info("Conversas", "Selecione uma conversa para cancelar.")
+            return
+        sender = self._conversation_rows[row]["sender"]
+        self.data_provider.delete_conversation(sender)
+        self.refresh_conversations()
+        self._show_info("Conversas", "Conversa cancelada.")
 
     def _save_categories(self) -> None:
         categories = [self.categories_list.item(index).text() for index in range(self.categories_list.count())]
@@ -418,6 +562,8 @@ class YkMediaMainWindow(QMainWindow):
             self.categories_list.addItem(category)
             self.category_input.clear()
             self._save_categories()
+            self.refresh_categories()
+            self.refresh_history()
 
     def _edit_selected_category(self) -> None:
         item = self.categories_list.currentItem()
@@ -426,11 +572,15 @@ class YkMediaMainWindow(QMainWindow):
             item.setText(text)
             self.category_input.clear()
             self._save_categories()
+            self.refresh_categories()
+            self.refresh_history()
 
     def _remove_selected_category(self) -> None:
         for item in self.categories_list.selectedItems():
             self.categories_list.takeItem(self.categories_list.row(item))
         self._save_categories()
+        self.refresh_categories()
+        self.refresh_history()
 
     def _move_category_up(self) -> None:
         self._move_selected_category(-1)
@@ -447,6 +597,108 @@ class YkMediaMainWindow(QMainWindow):
         self.categories_list.insertItem(target, item)
         self.categories_list.setCurrentRow(target)
         self._save_categories()
+
+    def _refresh_history_categories_filter(self, categories: list[str]) -> None:
+        current = self.history_filter.currentText()
+        self.history_filter.blockSignals(True)
+        self.history_filter.clear()
+        self.history_filter.addItem("Todos")
+        self.history_filter.addItems(categories)
+        if current:
+            index = self.history_filter.findText(current)
+            self.history_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.history_filter.blockSignals(False)
+
+    def _choose_downloads_root(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "Selecionar pasta de midias", self.downloads_root_input.text())
+        if directory:
+            self.downloads_root_input.setText(directory)
+
+    def _choose_sqlite_database(self) -> None:
+        file_path, _ = QFileDialog.getSaveFileName(self, "Selecionar banco SQLite", self.sqlite_database_input.text(), "SQLite (*.sqlite3 *.db)")
+        if file_path:
+            self.sqlite_database_input.setText(file_path)
+
+    def _choose_ffmpeg_path(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar FFmpeg", self.ffmpeg_path_input.text(), "Executavel (*.exe);;Todos (*.*)")
+        if file_path:
+            self.ffmpeg_path_input.setText(file_path)
+
+    def _save_settings(self) -> None:
+        categories = [self.categories_list.item(index).text() for index in range(self.categories_list.count())]
+        self.data_provider.update_settings(
+            downloads_root=self.downloads_root_input.text().strip(),
+            ffmpeg_path=self.ffmpeg_path_input.text().strip(),
+            sqlite_database=self.sqlite_database_input.text().strip(),
+            categories=categories,
+        )
+        self.refresh_all()
+        self._show_info("Configuracoes", "Configuracoes salvas para esta execucao.")
+
+    def _refresh_evolution_session(self, show_message: bool = True) -> None:
+        snapshot = self.data_provider.get_evolution_session_snapshot()
+        self.evolution_state_label.setText(snapshot.state)
+        self.header_indicators["evolution"].setText(f"Evolution {snapshot.state}")
+        if show_message and snapshot.message:
+            self._show_info("WhatsApp", snapshot.message)
+
+    def _connect_evolution_session(self) -> None:
+        snapshot = self.data_provider.connect_evolution_session()
+        self.evolution_state_label.setText(snapshot.state)
+        self.header_indicators["evolution"].setText(f"Evolution {snapshot.state}")
+        if snapshot.qrcode_base64:
+            self._show_qrcode(snapshot.qrcode_base64)
+        self._show_info("WhatsApp", snapshot.message or "Solicitacao de QR Code concluida.")
+
+    def _disconnect_evolution_session(self) -> None:
+        snapshot = self.data_provider.disconnect_evolution_session()
+        self.evolution_state_label.setText(snapshot.state)
+        self.header_indicators["evolution"].setText(f"Evolution {snapshot.state}")
+        self.evolution_qrcode_label.clear()
+        self.evolution_qrcode_label.setText("Sessao desconectada. Clique em Gerar QR Code para conectar novamente.")
+        self._show_info("WhatsApp", snapshot.message or "Sessao desconectada.")
+
+    def _reconnect_evolution_session(self) -> None:
+        snapshot = self.data_provider.reconnect_evolution_session()
+        self.evolution_state_label.setText(snapshot.state)
+        self.header_indicators["evolution"].setText(f"Evolution {snapshot.state}")
+        if snapshot.qrcode_base64:
+            self._show_qrcode(snapshot.qrcode_base64)
+        else:
+            self.evolution_qrcode_label.setText("Nao foi possivel obter um novo QR Code.")
+        self._show_info("WhatsApp", snapshot.message or "Novo QR Code solicitado.")
+
+    def _show_qrcode(self, qrcode_base64: str) -> None:
+        encoded_content = qrcode_base64.split(",", 1)[1] if "," in qrcode_base64 else qrcode_base64
+        try:
+            image_content = base64.b64decode(encoded_content)
+        except ValueError:
+            self.evolution_qrcode_label.setText("QR Code recebido em formato invalido.")
+            return
+
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(image_content):
+            self.evolution_qrcode_label.setText("Nao foi possivel renderizar o QR Code.")
+            return
+
+        self.evolution_qrcode_label.setPixmap(pixmap)
+
+    def _open_media_root(self) -> None:
+        self._open_path(self.data_provider.media_root_path())
+
+    def _open_logs_directory(self) -> None:
+        self._open_path(self.data_provider.logs_directory_path())
+
+    def _export_logs(self) -> None:
+        target_path, _ = QFileDialog.getSaveFileName(self, "Exportar logs", "ykmedia-logs.txt", "Texto (*.txt)")
+        if not target_path:
+            return
+        count = self.data_provider.export_logs(target_path)
+        self._show_info("Logs", f"{count} linha(s) exportada(s).")
+
+    def _open_path(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True) if path.suffix == "" else path.parent.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _metric_card(self, title: str) -> tuple[QWidget, QLabel]:
         card = QFrame()
@@ -468,12 +720,13 @@ class YkMediaMainWindow(QMainWindow):
         title_label.setObjectName("panel_title")
         body_label = QLabel(body)
         body_label.setObjectName("muted")
+        body_label.setWordWrap(True)
         layout.addWidget(title_label)
         layout.addWidget(body_label)
         layout.addStretch()
         return panel
 
-    def _settings_group(self, title: str, fields: list[tuple[str, QLineEdit]]) -> QWidget:
+    def _settings_group(self, title: str, fields: list[tuple[str, QWidget]]) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
         layout = QVBoxLayout(panel)
@@ -506,6 +759,9 @@ class YkMediaMainWindow(QMainWindow):
         for row_index, row in enumerate(rows):
             for column_index, key in enumerate(keys):
                 table.setItem(row_index, column_index, QTableWidgetItem(row[key]))
+
+    def _show_info(self, title: str, message: str) -> None:
+        QMessageBox.information(self, title, message)
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(
@@ -597,6 +853,13 @@ class YkMediaMainWindow(QMainWindow):
             }
             QPushButton:hover {
                 background: #17364a;
+            }
+            QLabel#qr_placeholder {
+                background: #0b1b26;
+                border: 1px solid #1c3544;
+                border-radius: 12px;
+                padding: 12px;
+                color: #90a4b4;
             }
             """
         )

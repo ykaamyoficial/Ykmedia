@@ -43,11 +43,13 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       SERVER_URL: http://localhost:8080
 
       AUTHENTICATION_TYPE: apikey
-      AUTHENTICATION_API_KEY: ykmedia-chave-local-2026
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
 
       DATABASE_ENABLED: "true"
@@ -61,6 +63,9 @@ services:
       CACHE_REDIS_SAVE_INSTANCES: "false"
 
       CONFIG_SESSION_PHONE_NAME: YkMedia
+      CONFIG_SESSION_PHONE_CLIENT: YkMedia
+      CONFIG_SESSION_PHONE_VERSION: 2.3000.1043944461
+      WEB_VERSION: 2.3000.1043944461
       LANGUAGE: pt-BR
       TELEMETRY: "false"
 
