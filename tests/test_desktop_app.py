@@ -4,9 +4,10 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabWidget
 
 from app.desktop.data_provider import DesktopDataProvider
+from app.desktop.formatters import format_datetime, format_phone
 from app.desktop.main_window import YkMediaMainWindow
 from app.services.category_service import CategoryService
 from app.services.processing_queue import ProcessingJobOrigin, ProcessingQueue
@@ -59,12 +60,43 @@ def _provider(tmp_path: Path) -> DesktopDataProvider:
         file_path="Louvores/louvor.mp3",
         status="CONCLUIDO",
     )
+    storage_service.save_contact_profile(
+        sender="556299999999@s.whatsapp.net",
+        display_name="Joao Silva",
+        profile_picture_path="",
+        updated_at="2026-07-27T17:21:35+00:00",
+    )
     storage_service.save_session(
         sender_id="556288888888@s.whatsapp.net",
-        state="WAITING_CATEGORY",
+        state="WAITING_CATEGORY_SELECTION",
         category=None,
         filename=None,
+        pending_media_id=None,
         updated_at=1785198927.0,
+    )
+    storage_service.save_conversation_message(
+        record_id="conv-1",
+        message_id="MSG1",
+        sender="556299999999@s.whatsapp.net",
+        direction="INBOUND",
+        content="Enviei uma imagem",
+        message_type="imagem",
+        state="WAITING_CATEGORY_SELECTION",
+        media_id="MSG1",
+        created_at="2026-07-27T17:21:35+00:00",
+        status="RECEBIDA",
+    )
+    storage_service.save_conversation_message(
+        record_id="conv-2",
+        message_id="MSG1",
+        sender="556299999999@s.whatsapp.net",
+        direction="OUTBOUND",
+        content="Recebi seu arquivo.",
+        message_type="texto",
+        state="WAITING_CATEGORY_SELECTION",
+        media_id=None,
+        created_at="2026-07-27T17:21:36+00:00",
+        status="ENVIADA",
     )
     return DesktopDataProvider(
         storage_service=storage_service,
@@ -98,6 +130,28 @@ def test_desktop_loads_required_tabs(tmp_path: Path) -> None:
         "Sobre",
     ]
     assert len(window.nav_buttons) == 8
+    assert window.findChild(QTabWidget) is None
+
+
+def test_desktop_settings_hides_technical_sections_in_advanced_area(tmp_path: Path) -> None:
+    _application()
+
+    window = YkMediaMainWindow(data_provider=_provider(tmp_path))
+
+    items = [window.settings_nav.item(index).text() for index in range(window.settings_nav.count())]
+    assert items == [
+        "Pastas",
+        "WhatsApp",
+        "Downloads",
+        "Atualizacoes",
+        "Tema",
+        "Idioma",
+        "Backup",
+        "Sistema",
+        "Avancado",
+    ]
+    assert "FFmpeg" not in items
+    assert "Banco de dados" not in items
 
 
 def test_desktop_loads_queue_and_history_data(tmp_path: Path) -> None:
@@ -183,6 +237,94 @@ def test_data_provider_disconnects_evolution_session(tmp_path: Path) -> None:
     snapshot = provider.disconnect_evolution_session()
 
     assert snapshot.state == "close"
+
+
+def test_desktop_formats_phone_and_datetime_for_tables(tmp_path: Path) -> None:
+    provider = _provider(tmp_path)
+
+    jobs = provider.list_jobs()
+    history = provider.list_history()
+
+    assert jobs[0]["sender"] == "+55 62 9999-9999"
+    assert history[0]["date_display"] == "27/07/2026 17:21"
+    assert format_phone("556281232931@s.whatsapp.net") == "+55 62 8123-2931"
+    assert format_datetime("2026-07-28T00:29:21+00:00") == "28/07/2026 00:29"
+
+
+def test_data_provider_groups_media_by_sender(tmp_path: Path) -> None:
+    provider = _provider(tmp_path)
+
+    conversations = provider.list_media_conversations()
+
+    assert len(conversations) == 1
+    assert conversations[0]["sender"] == "+55 62 9999-9999"
+    assert conversations[0]["display_name"] == "Joao Silva"
+    assert conversations[0]["media_count"] == 1
+    assert conversations[0]["items"]
+
+
+def test_data_provider_lists_realtime_conversation_threads(tmp_path: Path) -> None:
+    provider = _provider(tmp_path)
+
+    conversations = provider.list_conversation_threads()
+    timeline = provider.list_conversation_timeline("556299999999@s.whatsapp.net")
+
+    assert conversations
+    assert conversations[0]["last_message"] == "Recebi seu arquivo."
+    assert conversations[0]["message_count"] == 2
+    assert timeline[0]["direction"] == "INBOUND"
+    assert {item["direction"] for item in timeline} == {"INBOUND", "OUTBOUND", "EVENT"}
+
+
+def test_desktop_loads_realtime_conversations(tmp_path: Path) -> None:
+    _application()
+
+    window = YkMediaMainWindow(data_provider=_provider(tmp_path))
+    window.nav_buttons["Conversas"].click()
+    window.refresh_conversations()
+
+    assert window.conversations_list.count() >= 1
+    assert "arquivo" in window.conversation_header.text()
+
+
+def test_desktop_conversations_use_compact_filters(tmp_path: Path) -> None:
+    _application()
+
+    window = YkMediaMainWindow(data_provider=_provider(tmp_path))
+
+    assert list(window.conversation_filter_buttons) == [
+        "Todos",
+        "Imagens",
+        "Videos",
+        "Audios",
+        "Documentos",
+        "YouTube",
+    ]
+    assert window.conversations_list.item(0).sizeHint().height() <= 60
+
+
+def test_desktop_conversation_details_panel_is_collapsible(tmp_path: Path) -> None:
+    _application()
+
+    window = YkMediaMainWindow(data_provider=_provider(tmp_path))
+    window.nav_buttons["Conversas"].click()
+
+    assert window.conversation_info.isHidden()
+
+    window.conversation_details_button.click()
+
+    assert not window.conversation_info.isHidden()
+    assert window.conversation_details_button.text() == "Ocultar detalhes"
+
+
+def test_desktop_supports_minimum_resolution(tmp_path: Path) -> None:
+    _application()
+
+    window = YkMediaMainWindow(data_provider=_provider(tmp_path))
+    window.resize(1280, 720)
+
+    assert window.minimumWidth() <= 1280
+    assert window.minimumHeight() <= 720
 
 
 def test_data_provider_reconnects_evolution_session_with_logout_first(tmp_path: Path) -> None:

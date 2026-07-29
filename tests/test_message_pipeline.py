@@ -11,6 +11,7 @@ from app.services.conversation_engine import ConversationEngine, ConversationSta
 from app.services.evolution_message_mapper import map_evolution_payload
 from app.services.file_storage import FileWriteError
 from app.services.message_pipeline import MessagePipeline
+from app.repositories.processed_message_repository import InMemoryProcessedMessageRepository
 from app.services.session_store import MemorySessionStore
 
 
@@ -62,12 +63,12 @@ class FakeYoutubeDownloader:
         return self.result
 
 
-def _payload(message: dict[str, Any]) -> dict[str, Any]:
+def _payload(message: dict[str, Any], message_id: str = "MSG1") -> dict[str, Any]:
     return {
         "event": "messages.upsert",
         "data": {
             "key": {
-                "id": "MSG1",
+                "id": message_id,
                 "remoteJid": "556299999999@s.whatsapp.net",
                 "fromMe": False,
             },
@@ -100,6 +101,7 @@ def _stored_file() -> StoredFile:
 def _pipeline(
     download_result: DownloadedMedia | Exception | None = None,
     storage_result: StoredFile | Exception | None = None,
+    processed_message_repository: InMemoryProcessedMessageRepository | None = None,
 ) -> tuple[MessagePipeline, FakeDownloadManager, FakeFileStorage]:
     download_manager = FakeDownloadManager(download_result or _downloaded_media())
     file_storage = FakeFileStorage(storage_result or _stored_file())
@@ -107,6 +109,7 @@ def _pipeline(
         download_manager=download_manager,
         file_storage=file_storage,
         conversation_engine=ConversationEngine(session_store=MemorySessionStore()),
+        processed_message_repository=processed_message_repository,
     )
     return pipeline, download_manager, file_storage
 
@@ -126,6 +129,9 @@ class SpyConversationEngine:
     def reset(self, remote_jid: str) -> None:
         self._engine.reset(remote_jid)
 
+    def attach_pending_media(self, remote_jid: str, media_id: str | None) -> None:
+        self._engine.attach_pending_media(remote_jid, media_id)
+
 
 def test_processes_text_message_without_download_or_storage() -> None:
     pipeline, download_manager, file_storage = _pipeline()
@@ -138,7 +144,8 @@ def test_processes_text_message_without_download_or_storage() -> None:
     assert result.downloaded_media is None
     assert result.stored_file is None
     assert result.conversation_result is not None
-    assert result.conversation_result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert result.conversation_result.next_state is ConversationState.IDLE
+    assert result.conversation_result.suggested_response == ""
     assert result.errors == []
     assert download_manager.calls == 0
     assert file_storage.calls == 0
@@ -213,6 +220,23 @@ def test_does_not_store_media_before_user_confirmation() -> None:
     assert result.conversation_result is not None
     assert result.errors == []
     assert download_manager.calls == 1
+    assert file_storage.calls == 0
+
+
+def test_sticker_does_not_download_or_start_conversation() -> None:
+    pipeline, download_manager, file_storage = _pipeline()
+
+    result = asyncio.run(
+        pipeline.process_event(_payload({"stickerMessage": {"mimetype": "image/webp"}}, "STICKER1"))
+    )
+
+    assert result.received_message is not None
+    assert result.received_message.message_type is MessageType.STICKER
+    assert result.downloaded_media is None
+    assert result.conversation_result is not None
+    assert result.conversation_result.next_state is ConversationState.IDLE
+    assert result.conversation_result.suggested_response == ""
+    assert download_manager.calls == 0
     assert file_storage.calls == 0
 
 
@@ -303,7 +327,6 @@ def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
     asyncio.run(pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
-    asyncio.run(pipeline.process_event(_payload({"conversation": "arquivo_antigo"})))
     result = asyncio.run(
         pipeline.process_event(_payload({"conversation": "https://youtu.be/abc"}))
     )
@@ -311,5 +334,78 @@ def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
     assert result.downloaded_media == downloaded_media
     assert result.conversation_result is not None
     assert result.conversation_result.current_state is ConversationState.IDLE
-    assert result.conversation_result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert result.conversation_result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert youtube_downloader.calls == 1
+
+
+def test_ignores_duplicated_text_message() -> None:
+    repository = InMemoryProcessedMessageRepository()
+    pipeline, download_manager, file_storage = _pipeline(processed_message_repository=repository)
+
+    first_result = asyncio.run(pipeline.process_event(_payload({"conversation": "Ola"}, "MSG1")))
+    duplicated_result = asyncio.run(pipeline.process_event(_payload({"conversation": "Ola"}, "MSG1")))
+
+    assert first_result.errors == []
+    assert duplicated_result.is_duplicate is True
+    assert duplicated_result.errors == ["mensagem_duplicada"]
+    assert duplicated_result.conversation_result is None
+    assert download_manager.calls == 0
+    assert file_storage.calls == 0
+
+
+def test_ignores_duplicated_media_message_without_second_download() -> None:
+    repository = InMemoryProcessedMessageRepository()
+    pipeline, download_manager, _ = _pipeline(processed_message_repository=repository)
+
+    first_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG1"))
+    )
+    duplicated_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG1"))
+    )
+
+    assert first_result.downloaded_media is not None
+    assert duplicated_result.is_duplicate is True
+    assert duplicated_result.downloaded_media is None
+    assert duplicated_result.conversation_result is None
+    assert download_manager.calls == 1
+
+
+def test_processes_different_messages_from_same_sender() -> None:
+    repository = InMemoryProcessedMessageRepository()
+    pipeline, download_manager, _ = _pipeline(processed_message_repository=repository)
+
+    first_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG1"))
+    )
+    second_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG2"))
+    )
+
+    assert first_result.is_duplicate is False
+    assert second_result.is_duplicate is False
+    assert download_manager.calls == 2
+
+
+def test_allows_retry_after_failed_processing() -> None:
+    repository = InMemoryProcessedMessageRepository()
+    failing_download = FakeDownloadManager(RuntimeError("falha download"))
+    file_storage = FakeFileStorage(_stored_file())
+    pipeline = MessagePipeline(
+        download_manager=failing_download,
+        file_storage=file_storage,
+        conversation_engine=ConversationEngine(session_store=MemorySessionStore()),
+        processed_message_repository=repository,
+    )
+
+    failed_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG1"))
+    )
+    pipeline._download_manager = FakeDownloadManager(_downloaded_media())
+    retry_result = asyncio.run(
+        pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}}, "MSG1"))
+    )
+
+    assert failed_result.errors == ["download: falha download"]
+    assert retry_result.errors == []
+    assert retry_result.downloaded_media is not None

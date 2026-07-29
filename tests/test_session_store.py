@@ -24,7 +24,7 @@ def test_recovers_session() -> None:
 
 def test_updates_session() -> None:
     store = MemorySessionStore()
-    session = ConversationSession(state=ConversationState.WAITING_FILENAME, category="musica")
+    session = ConversationSession(state=ConversationState.WAITING_FILENAME_DECISION, category="musica")
 
     store.update("sender-1", session)
 
@@ -57,13 +57,13 @@ def test_handles_multiple_sessions_simultaneously() -> None:
     first_session = store.create("sender-1")
     second_session = store.create("sender-2")
 
-    first_session.state = ConversationState.WAITING_CATEGORY
-    second_session.state = ConversationState.WAITING_FILENAME
+    first_session.state = ConversationState.WAITING_CATEGORY_SELECTION
+    second_session.state = ConversationState.WAITING_FILENAME_DECISION
     store.update("sender-1", first_session)
     store.update("sender-2", second_session)
 
-    assert store.get("sender-1").state is ConversationState.WAITING_CATEGORY  # type: ignore[union-attr]
-    assert store.get("sender-2").state is ConversationState.WAITING_FILENAME  # type: ignore[union-attr]
+    assert store.get("sender-1").state is ConversationState.WAITING_CATEGORY_SELECTION  # type: ignore[union-attr]
+    assert store.get("sender-2").state is ConversationState.WAITING_FILENAME_DECISION  # type: ignore[union-attr]
 
 
 def test_clear_expired_returns_removed_count() -> None:

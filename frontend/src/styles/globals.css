@@ -1,0 +1,85 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: 210 24% 98%;
+  --surface: 210 28% 96%;
+  --panel: 0 0% 100%;
+  --panel-elevated: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --secondary: 215 16% 43%;
+  --muted: 213 32% 94%;
+  --border: 214 24% 88%;
+  --accent: 214 100% 48%;
+  --success: 145 63% 42%;
+  --warning: 38 92% 50%;
+  --danger: 354 84% 57%;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --shadow-panel: 0 12px 34px rgb(15 23 42 / 0.08);
+  --transition-fast: 120ms ease;
+  --transition-normal: 180ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: 216 39% 7%;
+    --surface: 216 36% 8%;
+    --panel: 213 38% 10%;
+    --panel-elevated: 214 35% 12%;
+    --foreground: 210 40% 98%;
+    --secondary: 216 20% 72%;
+    --muted: 212 34% 15%;
+    --border: 213 30% 20%;
+    --accent: 211 100% 56%;
+    --success: 145 65% 49%;
+    --warning: 42 96% 55%;
+    --danger: 354 84% 62%;
+    --shadow-panel: 0 18px 42px rgb(0 0 0 / 0.28);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: 216 39% 7%;
+  --surface: 216 36% 8%;
+  --panel: 213 38% 10%;
+  --panel-elevated: 214 35% 12%;
+  --foreground: 210 40% 98%;
+  --secondary: 216 20% 72%;
+  --muted: 212 34% 15%;
+  --border: 213 30% 20%;
+  --accent: 211 100% 56%;
+  --success: 145 65% 49%;
+  --warning: 42 96% 55%;
+  --danger: 354 84% 62%;
+  --shadow-panel: 0 18px 42px rgb(0 0 0 / 0.28);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1000px;
+  min-height: 650px;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  background: hsl(var(--background));
+}
+
+button,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.22);
+}

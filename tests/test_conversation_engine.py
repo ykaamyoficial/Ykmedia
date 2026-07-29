@@ -1,111 +1,181 @@
-from app.models.message import MessageType, ReceivedMessage, Sender
+from app.models.message import Media, MessageType, ReceivedMessage, Sender
+from app.models.interactive import IncomingInteraction, InteractionSource
 from app.services.category_service import CategoryService
 from app.services.conversation_engine import ConversationEngine, ConversationState
 from app.services.session_store import MemorySessionStore
 
 
-def _message(text: str | None = None, remote_jid: str = "556299999999@s.whatsapp.net") -> ReceivedMessage:
+def _message(
+    text: str | None = None,
+    message_type: MessageType = MessageType.TEXT,
+    remote_jid: str = "556299999999@s.whatsapp.net",
+    raw_type: str | None = None,
+) -> ReceivedMessage:
     return ReceivedMessage(
-        message_id="MSG1",
-        sender=Sender(remote_jid=remote_jid),
-        message_type=MessageType.TEXT if text is not None else MessageType.AUDIO,
-        raw_type="conversation" if text is not None else "audioMessage",
+        message_id=f"MSG-{text or message_type.value}",
+        sender=Sender(remote_jid=remote_jid, is_group=remote_jid.endswith("@g.us")),
+        message_type=message_type,
+        raw_type=raw_type or ("conversation" if message_type is MessageType.TEXT else f"{message_type.value}Message"),
         text=text,
+        media=Media(mimetype="image/jpeg") if message_type is not MessageType.TEXT else None,
     )
 
 
-def test_starts_conversation() -> None:
-    engine = ConversationEngine(session_store=MemorySessionStore())
+def _interaction_message(option_id: str, title: str = "Opcao") -> ReceivedMessage:
+    return ReceivedMessage(
+        message_id=f"MSG-{option_id}",
+        sender=Sender(remote_jid="556299999999@s.whatsapp.net"),
+        message_type=MessageType.TEXT,
+        raw_type="buttonsResponseMessage",
+        text=title,
+        interaction=IncomingInteraction(
+            option_id=option_id,
+            option_title=title,
+            source_type=InteractionSource.BUTTON_REPLY,
+        ),
+    )
 
-    result = engine.handle(_message())
+
+def test_text_simple_is_ignored_without_starting_session() -> None:
+    store = MemorySessionStore()
+    engine = ConversationEngine(session_store=store)
+
+    result = engine.handle(_message("Ola"))
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert result.next_state is ConversationState.IDLE
+    assert result.suggested_response == ""
+    assert store.exists("556299999999@s.whatsapp.net") is False
+
+
+def test_group_message_is_ignored() -> None:
+    store = MemorySessionStore()
+    engine = ConversationEngine(session_store=store)
+
+    result = engine.handle(
+        _message(
+            message_type=MessageType.IMAGE,
+            remote_jid="556299999999-123@g.us",
+            raw_type="imageMessage",
+        )
+    )
+
+    assert result.suggested_response == ""
+    assert result.next_state is ConversationState.IDLE
+
+
+def test_sticker_is_ignored() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    result = engine.handle(_message(message_type=MessageType.STICKER, raw_type="stickerMessage"))
+
+    assert result.next_state is ConversationState.IDLE
+    assert result.suggested_response == ""
+
+
+def test_image_starts_conversation_with_single_question() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    result = engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+
+    assert result.current_state is ConversationState.IDLE
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.is_finished is False
-    assert "sonoplastia" in result.suggested_response
+    assert "resposta automatica da equipe de Sonoplastia" not in result.suggested_response
+    assert "Recebi 1 arquivo" in result.suggested_response
+    assert "Escolha a categoria" in result.suggested_response
+    assert result.interactive_prompt is not None
 
 
-def test_transitions_between_states() -> None:
+def test_valid_link_starts_conversation() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message())
-    confirmation_result = engine.handle(_message("1"))
-    category_result = engine.handle(_message("1"))
-    filename_result = engine.handle(_message("louvor"))
+    result = engine.handle(_message("https://youtu.be/abc", MessageType.LINK, raw_type="youtubeMessage"))
 
-    assert confirmation_result.current_state is ConversationState.WAITING_USAGE_CONFIRMATION
-    assert confirmation_result.next_state is ConversationState.WAITING_CATEGORY
-    assert category_result.current_state is ConversationState.WAITING_CATEGORY
-    assert category_result.next_state is ConversationState.WAITING_FILENAME
-    assert filename_result.current_state is ConversationState.WAITING_FILENAME
-    assert filename_result.next_state is ConversationState.FINISHED
-    assert filename_result.is_finished is True
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert "Recebi 1 arquivo" in result.suggested_response
 
 
-def test_keeps_state_on_invalid_category_response() -> None:
+def test_multiple_files_are_grouped_in_same_session() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message())
+    start = engine.handle(_message(message_type=MessageType.VIDEO, raw_type="videoMessage"))
+    second = engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert start.suggested_response
+    assert second.suggested_response == ""
+    assert session is not None
+    assert session.received_types == ("video", "imagem")
+
+
+def test_single_file_asks_if_user_wants_to_rename_after_category() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    result = engine.handle(_message("1"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert result.current_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_FILENAME_DECISION
+    assert result.is_finished is False
+    assert "Deseja renomear este arquivo" in result.suggested_response
+    assert session is not None
+    assert session.category == "Louvores"
+
+
+def test_keep_original_name_finishes_single_file_flow() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
     engine.handle(_message("1"))
+    result = engine.handle(_message("1"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert result.current_state is ConversationState.WAITING_FILENAME_DECISION
+    assert result.next_state is ConversationState.FINISHED
+    assert result.is_finished is True
+    assert "organizados com sucesso" in result.suggested_response
+    assert session is not None
+
+
+def test_invalid_category_keeps_state() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
     result = engine.handle(_message("9"))
 
-    assert result.current_state is ConversationState.WAITING_CATEGORY
-    assert result.next_state is ConversationState.WAITING_CATEGORY
+    assert result.current_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.is_finished is False
     assert "Opcao invalida" in result.suggested_response
 
 
-def test_finishes_flow() -> None:
+def test_timeout_cancels_session() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+    assert session is not None
+    session.expires_at = 1
 
-    engine.handle(_message())
-    engine.handle(_message("1"))
-    engine.handle(_message("1"))
-    result = engine.handle(_message("louvor"))
+    result = engine.handle(_message("1"))
 
-    assert result.current_state is ConversationState.WAITING_FILENAME
-    assert result.next_state is ConversationState.FINISHED
+    assert result.next_state is ConversationState.IDLE
     assert result.is_finished is True
+    assert "Nao recebemos sua resposta" in result.suggested_response
+    assert engine.get_session("556299999999@s.whatsapp.net") is None
 
 
-def test_restarts_conversation_after_reset() -> None:
+def test_restarts_new_session_after_finished_flow() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
-    remote_jid = "556299999999@s.whatsapp.net"
 
-    engine.handle(_message(remote_jid=remote_jid))
-    engine.handle(_message("1", remote_jid=remote_jid))
-    engine.handle(_message("1", remote_jid=remote_jid))
-    engine.reset(remote_jid)
-    result = engine.handle(_message(remote_jid=remote_jid))
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message("1"))
+    engine.handle(_message("1"))
+    result = engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
-
-
-def test_starts_new_flow_when_new_media_arrives_after_finished_flow() -> None:
-    engine = ConversationEngine(session_store=MemorySessionStore())
-
-    engine.handle(_message())
-    engine.handle(_message("1"))
-    engine.handle(_message("1"))
-    engine.handle(_message("louvor"))
-    result = engine.handle(_message())
-
-    assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
-    assert result.is_finished is False
-
-
-def test_cancels_when_usage_is_rejected() -> None:
-    engine = ConversationEngine(session_store=MemorySessionStore())
-
-    engine.handle(_message())
-    result = engine.handle(_message("2"))
-
-    assert result.current_state is ConversationState.WAITING_USAGE_CONFIRMATION
-    assert result.next_state is ConversationState.FINISHED
-    assert result.is_finished is True
-    assert "nao sera enviado" in result.suggested_response
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
 
 
 def test_uses_dynamic_categories() -> None:
@@ -115,13 +185,28 @@ def test_uses_dynamic_categories() -> None:
         category_service=category_service,
     )
 
-    start_result = engine.handle(_message())
-    confirmation_result = engine.handle(_message("1"))
+    start_result = engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
     category_result = engine.handle(_message("2"))
     session = engine.get_session("556299999999@s.whatsapp.net")
 
-    assert "sonoplastia" in start_result.suggested_response
-    assert "1 Eventos, 2 Ensaios" in confirmation_result.suggested_response
-    assert category_result.next_state is ConversationState.WAITING_FILENAME
+    assert "1 - Eventos" in start_result.suggested_response
+    assert "2 - Ensaios" in start_result.suggested_response
+    assert category_result.next_state is ConversationState.WAITING_FILENAME_DECISION
     assert session is not None
     assert session.category == "Ensaios"
+
+
+def test_selects_category_from_interactive_button() -> None:
+    engine = ConversationEngine(
+        session_store=MemorySessionStore(),
+        category_service=CategoryService(categories=["Louvores", "Mensagens"]),
+    )
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    result = engine.handle(_interaction_message("category:2", "Mensagens"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert result.next_state is ConversationState.WAITING_FILENAME_DECISION
+    assert session is not None
+    assert session.category == "Mensagens"
+    assert result.interactive_prompt is None

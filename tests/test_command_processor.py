@@ -14,6 +14,15 @@ def _message(text: str, remote_jid: str = "556299999999@s.whatsapp.net") -> Rece
     )
 
 
+def _media_message(remote_jid: str = "556299999999@s.whatsapp.net") -> ReceivedMessage:
+    return ReceivedMessage(
+        message_id="MSG-MEDIA",
+        sender=Sender(remote_jid=remote_jid),
+        message_type=MessageType.IMAGE,
+        raw_type="imageMessage",
+    )
+
+
 def test_help_command_lists_all_commands() -> None:
     processor = CommandProcessor(ConversationEngine(session_store=MemorySessionStore()))
 
@@ -30,7 +39,7 @@ def test_help_command_lists_all_commands() -> None:
 def test_cancel_command_removes_active_conversation() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
     processor = CommandProcessor(engine)
-    engine.handle(_message("arquivo"))
+    engine.handle(_media_message())
 
     result = processor.process(_message("!cancelar"))
 
@@ -41,11 +50,11 @@ def test_cancel_command_removes_active_conversation() -> None:
 def test_status_command_with_active_conversation() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
     processor = CommandProcessor(engine)
-    engine.handle(_message("arquivo"))
+    engine.handle(_media_message())
 
     result = processor.process(_message("!status"))
 
-    assert "WAITING_USAGE_CONFIRMATION" in result.response
+    assert ConversationState.WAITING_CATEGORY_SELECTION.value in result.response
 
 
 def test_status_command_without_active_conversation() -> None:
@@ -59,7 +68,7 @@ def test_status_command_without_active_conversation() -> None:
 def test_restart_command_removes_active_conversation() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
     processor = CommandProcessor(engine)
-    engine.handle(_message("arquivo"))
+    engine.handle(_media_message())
 
     result = processor.process(_message("!reiniciar"))
 
@@ -88,11 +97,11 @@ def test_unknown_command() -> None:
 def test_command_during_active_conversation_does_not_advance_state() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
     processor = CommandProcessor(engine)
-    engine.handle(_message("arquivo"))
+    engine.handle(_media_message())
 
     result = processor.process(_message("!status"))
 
     session = engine.get_session("556299999999@s.whatsapp.net")
     assert session is not None
-    assert session.state is ConversationState.WAITING_USAGE_CONFIRMATION
-    assert "WAITING_USAGE_CONFIRMATION" in result.response
+    assert session.state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert ConversationState.WAITING_CATEGORY_SELECTION.value in result.response

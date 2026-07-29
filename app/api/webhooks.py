@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
@@ -28,6 +29,12 @@ async def evolution_webhook(
         )
 
     payload = await request.json()
+    logger.info(
+        "Webhook Evolution recebido: telefone=%s tipo=%s timestamp=%s",
+        _payload_sender(payload),
+        _payload_message_type(payload),
+        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
     result = await use_case.execute(payload)
 
     if result.errors:
@@ -48,3 +55,29 @@ async def evolution_webhook(
         "message_sent": delivery_result.sent,
         "has_errors": bool(result.errors) or delivery_result.error is not None,
     }
+
+
+def _payload_sender(payload: dict[str, object]) -> str:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return "-"
+    key = data.get("key")
+    if not isinstance(key, dict):
+        return "-"
+    value = key.get("remoteJid") or key.get("remoteJidAlt")
+    return str(value) if value is not None else "-"
+
+
+def _payload_message_type(payload: dict[str, object]) -> str:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return "-"
+    value = data.get("messageType")
+    if value is not None:
+        return str(value)
+    message = data.get("message")
+    if isinstance(message, dict):
+        for key in message:
+            if key.endswith("Message") or key == "conversation":
+                return str(key)
+    return "-"

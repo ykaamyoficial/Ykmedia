@@ -1,3 +1,5 @@
+import sqlite3
+import time
 from pathlib import Path
 
 from app.models.message import MessageType, ReceivedMessage, Sender
@@ -8,6 +10,7 @@ from app.services.conversation_engine import (
     ConversationState,
 )
 from app.services.processing_queue import ProcessingJobOrigin, ProcessingQueue
+from app.repositories.processed_message_repository import SQLiteProcessedMessageRepository
 from app.services.session_store import SQLiteSessionStore
 from app.services.storage_service import StorageService
 
@@ -82,14 +85,128 @@ def test_persists_media_history(tmp_path: Path) -> None:
     ]
 
 
+def test_lists_media_contacts_and_files_by_sender(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    storage = StorageService(database_path=database_path)
+    storage.save_media_history(
+        history_id="hist-1",
+        date="2026-07-27T17:21:35+00:00",
+        sender="556299999999@s.whatsapp.net",
+        origin="WhatsApp",
+        category="Louvores",
+        final_name="louvor.mp3",
+        file_path="Louvores/louvor.mp3",
+        status="CONCLUIDO",
+    )
+    storage.save_media_history(
+        history_id="hist-2",
+        date="2026-07-27T18:21:35+00:00",
+        sender="556299999999@s.whatsapp.net",
+        origin="WhatsApp",
+        category="Louvores",
+        final_name="imagem.jpg",
+        file_path="Louvores/imagem.jpg",
+        status="CONCLUIDO",
+    )
+
+    contacts = storage.list_media_contacts()
+    files = storage.list_media_by_sender("556299999999@s.whatsapp.net")
+
+    assert contacts[0]["sender"] == "556299999999@s.whatsapp.net"
+    assert contacts[0]["media_count"] == 2
+    assert contacts[0]["last_media"] == "imagem.jpg"
+    assert [file["final_name"] for file in files] == ["imagem.jpg", "louvor.mp3"]
+
+
+def test_persists_contact_profile(tmp_path: Path) -> None:
+    storage = StorageService(database_path=tmp_path / "ykmedia.sqlite3")
+
+    storage.save_contact_profile(
+        sender="556299999999@s.whatsapp.net",
+        display_name="Joao Silva",
+        profile_picture_url="https://example.com/photo.jpg",
+        profile_picture_path="data/contact_photos/556299999999.jpg",
+        updated_at="2026-07-29T10:00:00+00:00",
+    )
+
+    profile = StorageService(database_path=tmp_path / "ykmedia.sqlite3").get_contact_profile(
+        "556299999999@s.whatsapp.net"
+    )
+
+    assert profile is not None
+    assert profile["display_name"] == "Joao Silva"
+    assert profile["profile_picture_url"] == "https://example.com/photo.jpg"
+
+
+def test_persists_processed_messages_after_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    storage = StorageService(database_path=database_path)
+    repository = SQLiteProcessedMessageRepository(storage_service=storage)
+
+    assert repository.start("MSG1", "sender-1") is True
+    repository.complete("MSG1")
+
+    restarted_repository = SQLiteProcessedMessageRepository(
+        storage_service=StorageService(database_path=database_path)
+    )
+
+    assert restarted_repository.start("MSG1", "sender-1") is False
+
+
+def test_persists_conversation_messages_and_contacts(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    storage = StorageService(database_path=database_path)
+
+    storage.save_conversation_message(
+        record_id="conv-1",
+        message_id="MSG1",
+        sender="sender-1",
+        direction="INBOUND",
+        content="Ola",
+        message_type="texto",
+        state="WAITING_CATEGORY_SELECTION",
+        media_id=None,
+        created_at="2026-07-28T10:00:00+00:00",
+        status="RECEBIDA",
+    )
+    storage.save_conversation_message(
+        record_id="conv-2",
+        message_id="MSG1",
+        sender="sender-1",
+        direction="OUTBOUND",
+        content="Como deseja classifica-lo?",
+        message_type="texto",
+        state="WAITING_CATEGORY_SELECTION",
+        media_id=None,
+        created_at="2026-07-28T10:00:01+00:00",
+        status="ENVIADA",
+    )
+
+    restarted_storage = StorageService(database_path=database_path)
+    messages = restarted_storage.list_conversation_messages("sender-1")
+    contacts = restarted_storage.list_conversation_contacts()
+
+    assert [message["content"] for message in messages] == [
+        "Ola",
+        "Como deseja classifica-lo?",
+    ]
+    assert contacts[0]["sender"] == "sender-1"
+    assert contacts[0]["last_content"] == "Como deseja classifica-lo?"
+    assert contacts[0]["message_count"] == 2
+
+
 def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
     database_path = tmp_path / "ykmedia.sqlite3"
     storage = StorageService(database_path=database_path)
     session_store = SQLiteSessionStore(storage_service=storage)
     session = ConversationSession(
-        state=ConversationState.WAITING_FILENAME,
+        state=ConversationState.WAITING_FILENAME_DECISION,
         category="Louvores",
         filename=None,
+        pending_media_id="MSG1",
+        allowed_option_ids=("filename:keep_original", "filename:custom"),
+        processed_interaction_ids=("CLICK1",),
+        interactive_created_at=123.0,
     )
     session_store.update("sender-1", session)
 
@@ -99,8 +216,65 @@ def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
     restored_session = restarted_store.get("sender-1")
 
     assert restored_session is not None
-    assert restored_session.state is ConversationState.WAITING_FILENAME
+    assert restored_session.state is ConversationState.WAITING_FILENAME_DECISION
     assert restored_session.category == "Louvores"
+    assert restored_session.pending_media_id == "MSG1"
+    assert restored_session.allowed_option_ids == (
+        "filename:keep_original",
+        "filename:custom",
+    )
+    assert restored_session.processed_interaction_ids == ("CLICK1",)
+    assert restored_session.interactive_created_at == 123.0
+
+
+def test_adds_pending_media_column_to_existing_database(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE conversation_sessions (
+                sender_id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                category TEXT,
+                filename TEXT,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+
+    storage = StorageService(database_path=database_path)
+    session_store = SQLiteSessionStore(storage_service=storage)
+    session_store.update(
+        "sender-1",
+        ConversationSession(
+            state=ConversationState.WAITING_CATEGORY_SELECTION,
+            pending_media_id="MSG1",
+        ),
+    )
+
+    restored_session = session_store.get("sender-1")
+
+    assert restored_session is not None
+    assert restored_session.pending_media_id == "MSG1"
+
+
+def test_sqlite_session_store_recovers_legacy_finished_state(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    storage = StorageService(database_path=database_path)
+    storage.save_session(
+        sender_id="sender-1",
+        state="FINISHED",
+        category=None,
+        filename=None,
+        pending_media_id=None,
+        updated_at=time.time(),
+    )
+    session_store = SQLiteSessionStore(storage_service=storage)
+
+    restored_session = session_store.get("sender-1")
+
+    assert restored_session is not None
+    assert restored_session.state is ConversationState.FINISHED
 
 
 def test_conversation_engine_persists_state_changes_with_sqlite_store(tmp_path: Path) -> None:
@@ -117,12 +291,12 @@ def test_conversation_engine_persists_state_changes_with_sqlite_store(tmp_path: 
 
     result = engine.handle(message)
 
-    assert result.next_state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     persisted_session = SQLiteSessionStore(
         storage_service=StorageService(database_path=database_path)
     ).get("sender-1")
     assert persisted_session is not None
-    assert persisted_session.state is ConversationState.WAITING_USAGE_CONFIRMATION
+    assert persisted_session.state is ConversationState.WAITING_CATEGORY_SELECTION
 
 
 def test_removes_expired_persisted_conversation_sessions(tmp_path: Path) -> None:
@@ -130,9 +304,10 @@ def test_removes_expired_persisted_conversation_sessions(tmp_path: Path) -> None
     storage = StorageService(database_path=database_path)
     storage.save_session(
         sender_id="sender-1",
-        state=ConversationState.WAITING_CATEGORY.value,
+        state=ConversationState.WAITING_CATEGORY_SELECTION.value,
         category=None,
         filename=None,
+        pending_media_id=None,
         updated_at=1.0,
     )
     session_store = SQLiteSessionStore(storage_service=storage, ttl_seconds=1.0)

@@ -5,9 +5,11 @@ from typing import Any, Callable, Protocol
 from app.models.download import DownloadedMedia
 from app.models.message import MessageType, ReceivedMessage
 from app.models.storage import StoredFile
+from app.repositories.processed_message_repository import ProcessedMessageRepository
 from app.services.command_processor import CommandProcessor, CommandResult
-from app.services.conversation_engine import ConversationResult
+from app.services.conversation_engine import ConversationResult, ConversationSession
 from app.services.evolution_message_mapper import EvolutionMessageMappingResult, map_evolution_payload
+from app.services.message_catalog import WhatsAppMessageCatalog
 from app.services.message_processor import ProcessingDecision, is_command_message, process_message
 from app.services.processing_queue import (
     ProcessingJob,
@@ -31,6 +33,15 @@ class ConversationService(Protocol):
     def handle(self, message: ReceivedMessage) -> ConversationResult:
         pass
 
+    def reset(self, remote_jid: str) -> None:
+        pass
+
+    def attach_pending_media(self, remote_jid: str, media_id: str | None) -> None:
+        pass
+
+    def get_session(self, remote_jid: str) -> ConversationSession | None:
+        pass
+
 
 class YoutubeDownloadService(Protocol):
     def extract_url(self, text: str | None) -> str | None:
@@ -49,6 +60,7 @@ class PipelineResult:
     conversation_result: ConversationResult | None
     command_result: CommandResult | None = None
     errors: list[str] = field(default_factory=list)
+    is_duplicate: bool = False
 
 
 class MessagePipeline:
@@ -61,6 +73,7 @@ class MessagePipeline:
         youtube_downloader: YoutubeDownloadService | None = None,
         processing_queue: ProcessingQueue | None = None,
         processing_worker: ProcessingWorker | None = None,
+        processed_message_repository: ProcessedMessageRepository | None = None,
         payload_mapper: Callable[[dict[str, Any]], EvolutionMessageMappingResult] = map_evolution_payload,
         message_processor: Callable[[ReceivedMessage], ProcessingDecision] = process_message,
     ) -> None:
@@ -71,6 +84,7 @@ class MessagePipeline:
         self._youtube_downloader = youtube_downloader
         self._processing_queue = processing_queue or ProcessingQueue()
         self._processing_worker = processing_worker or ProcessingWorker()
+        self._processed_message_repository = processed_message_repository
         self._payload_mapper = payload_mapper
         self._message_processor = message_processor
 
@@ -115,9 +129,20 @@ class MessagePipeline:
             )
 
         message = mapping_result.message
+        if not self._start_message_processing(message):
+            return PipelineResult(
+                received_message=message,
+                processing_decision=None,
+                downloaded_media=None,
+                stored_file=None,
+                conversation_result=None,
+                errors=["mensagem_duplicada"],
+                is_duplicate=True,
+            )
+
         if is_command_message(message):
             command_result = self._process_command(message)
-            return PipelineResult(
+            result = PipelineResult(
                 received_message=message,
                 processing_decision=None,
                 downloaded_media=None,
@@ -126,13 +151,15 @@ class MessagePipeline:
                 command_result=command_result,
                 errors=errors,
             )
+            self._finish_message_processing(message, result)
+            return result
 
         decision = self._message_processor(message)
         downloaded_media: DownloadedMedia | None = None
         stored_file: StoredFile | None = None
         downloaded_from_youtube = False
 
-        if message.media is not None:
+        if message.media is not None and self._is_downloadable_media(message):
             try:
                 downloaded_media = await self._download_manager.download(message)
             except Exception as exc:
@@ -148,9 +175,14 @@ class MessagePipeline:
             message=message,
             downloaded_from_youtube=downloaded_from_youtube,
         )
+        if downloaded_media is not None:
+            self._conversation_engine.attach_pending_media(
+                conversation_message.sender.remote_jid,
+                downloaded_media.message_id,
+            )
         conversation_result = self._conversation_engine.handle(conversation_message)
 
-        return PipelineResult(
+        result = PipelineResult(
             received_message=message,
             processing_decision=decision,
             downloaded_media=downloaded_media,
@@ -159,9 +191,37 @@ class MessagePipeline:
             command_result=None,
             errors=errors,
         )
+        self._finish_message_processing(message, result)
+        return result
 
     def _format_error(self, stage: str, error: Exception) -> str:
         return f"{stage}: {error}"
+
+    def _start_message_processing(self, message: ReceivedMessage) -> bool:
+        if self._processed_message_repository is None:
+            return True
+
+        return self._processed_message_repository.start(
+            message_id=message.message_id,
+            sender=message.sender.remote_jid,
+        )
+
+    def _finish_message_processing(
+        self,
+        message: ReceivedMessage,
+        result: PipelineResult,
+    ) -> None:
+        if self._processed_message_repository is None:
+            return
+
+        if result.errors:
+            self._processed_message_repository.fail(
+                message.message_id,
+                "; ".join(result.errors),
+            )
+            return
+
+        self._processed_message_repository.complete(message.message_id)
 
     def _process_command(self, message: ReceivedMessage) -> CommandResult:
         if self._command_processor is not None:
@@ -169,7 +229,7 @@ class MessagePipeline:
 
         return CommandResult(
             command=message.text or "",
-            response="Comandos indisponiveis nesta etapa.",
+            response=WhatsAppMessageCatalog.commands_unavailable(),
         )
 
     def _has_youtube_link(self, message: ReceivedMessage) -> bool:
@@ -177,6 +237,14 @@ class MessagePipeline:
             self._youtube_downloader is not None
             and self._youtube_downloader.extract_url(message.text) is not None
         )
+
+    def _is_downloadable_media(self, message: ReceivedMessage) -> bool:
+        return message.message_type in {
+            MessageType.IMAGE,
+            MessageType.AUDIO,
+            MessageType.VIDEO,
+            MessageType.DOCUMENT,
+        }
 
     def _message_for_conversation(
         self,

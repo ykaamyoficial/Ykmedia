@@ -5,6 +5,7 @@ import httpx
 
 from app.core.config import settings
 from app.models.download import DownloadedMedia
+from app.models.interactive import InteractiveOption
 from app.models.message import ReceivedMessage
 
 
@@ -63,10 +64,87 @@ class EvolutionClient:
             },
         )
 
+    async def send_reply_buttons(
+        self,
+        recipient: str,
+        text: str,
+        options: list[InteractiveOption],
+        footer: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_recipient = self._normalize_recipient(recipient)
+        normalized_text = text.strip()
+        if not normalized_recipient:
+            raise EvolutionInvalidResponseError("Cannot send buttons without a recipient.")
+        if not normalized_text:
+            raise EvolutionInvalidResponseError("Cannot send buttons without text.")
+        if not 1 <= len(options) <= 3:
+            raise EvolutionInvalidResponseError("Reply buttons require between 1 and 3 options.")
+
+        return await self._request_json(
+            "POST",
+            f"/message/sendButtons/{settings.EVOLUTION_INSTANCE}",
+            json={
+                "number": normalized_recipient,
+                "title": normalized_text,
+                "footer": footer or "YkMedia",
+                "buttons": [
+                    {
+                        "type": "reply",
+                        "displayText": option.title,
+                        "id": option.id,
+                    }
+                    for option in options
+                ],
+            },
+        )
+
+    async def send_selection_list(
+        self,
+        recipient: str,
+        text: str,
+        button_text: str,
+        options: list[InteractiveOption],
+        footer: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_recipient = self._normalize_recipient(recipient)
+        normalized_text = text.strip()
+        normalized_button_text = button_text.strip()
+        if not normalized_recipient:
+            raise EvolutionInvalidResponseError("Cannot send a list without a recipient.")
+        if not normalized_text:
+            raise EvolutionInvalidResponseError("Cannot send a list without text.")
+        if not normalized_button_text:
+            raise EvolutionInvalidResponseError("Cannot send a list without button text.")
+        if not options:
+            raise EvolutionInvalidResponseError("Cannot send an empty list.")
+
+        return await self._request_json(
+            "POST",
+            f"/message/sendList/{settings.EVOLUTION_INSTANCE}",
+            json={
+                "number": normalized_recipient,
+                "title": normalized_text,
+                "footerText": footer or "YkMedia",
+                "buttonText": normalized_button_text,
+                "sections": [{"title": "Opcoes", "rows": [self._list_row(option) for option in options]}],
+            },
+        )
+
     async def connect_instance(self) -> dict[str, Any]:
         return await self._request_json(
             "GET",
             f"/instance/connect/{settings.EVOLUTION_INSTANCE}",
+        )
+
+    async def create_instance(self) -> dict[str, Any]:
+        return await self._request_json(
+            "POST",
+            "/instance/create",
+            json={
+                "instanceName": settings.EVOLUTION_INSTANCE,
+                "qrcode": True,
+                "integration": "BAILEYS",
+            },
         )
 
     async def get_connection_state(self) -> dict[str, Any]:
@@ -79,6 +157,32 @@ class EvolutionClient:
         return await self._request_json(
             "DELETE",
             f"/instance/logout/{settings.EVOLUTION_INSTANCE}",
+        )
+
+    async def set_webhook(
+        self,
+        url: str,
+        webhook_secret: str = "",
+        events: list[str] | None = None,
+    ) -> dict[str, Any]:
+        headers = {"x-webhook-secret": webhook_secret} if webhook_secret else {}
+        return await self._request_json(
+            "POST",
+            f"/webhook/set/{settings.EVOLUTION_INSTANCE}",
+            json={
+                "enabled": True,
+                "url": url,
+                "events": events or ["MESSAGES_UPSERT"],
+                "headers": headers,
+                "base64": False,
+            },
+        )
+
+    async def fetch_profile_picture_url(self, number: str) -> dict[str, Any]:
+        return await self._request_json(
+            "POST",
+            f"/chat/fetchProfilePictureUrl/{settings.EVOLUTION_INSTANCE}",
+            json={"number": self._normalize_recipient(number)},
         )
 
     async def download_media(self, message: ReceivedMessage) -> DownloadedMedia:
@@ -175,3 +279,12 @@ class EvolutionClient:
             value = value.split("@", 1)[0]
 
         return "".join(character for character in value if character.isdigit())
+
+    def _list_row(self, option: InteractiveOption) -> dict[str, str]:
+        row = {
+            "title": option.title,
+            "rowId": option.id,
+        }
+        if option.description:
+            row["description"] = option.description
+        return row

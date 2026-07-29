@@ -91,7 +91,7 @@ class FileStorage:
         if not source_path.exists():
             raise FileWriteError("Arquivo original nao encontrado para movimentacao.")
 
-        self._validate_file_name(destination_folder)
+        self._validate_folder_path(destination_folder)
         target_file_name = self._resolve_renamed_file_name(
             new_file_name=new_file_name,
             original_extension=stored_file.extension,
@@ -132,6 +132,14 @@ class FileStorage:
         file_path = Path(file_name)
         if file_path.name != file_name or file_name in {".", ".."}:
             raise InvalidFileNameError("Nome de arquivo nao pode conter caminho.")
+
+    def _validate_folder_path(self, folder_path: str) -> None:
+        path = Path(folder_path)
+        if not folder_path or path.is_absolute():
+            raise InvalidFileNameError("Pasta de destino invalida.")
+
+        for part in path.parts:
+            self._validate_file_name(part)
 
     def _resolve_renamed_file_name(self, new_file_name: str, original_extension: str) -> str:
         self._validate_file_name(new_file_name)

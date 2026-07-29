@@ -17,6 +17,9 @@ class MediaRepository(Protocol):
     def exists(self, media_id: str) -> bool:
         pass
 
+    def delete(self, media_id: str) -> None:
+        pass
+
 
 class InMemoryMediaRepository:
     def __init__(self) -> None:
@@ -38,3 +41,7 @@ class InMemoryMediaRepository:
     def exists(self, media_id: str) -> bool:
         with self._lock:
             return media_id in self._records
+
+    def delete(self, media_id: str) -> None:
+        with self._lock:
+            self._records.pop(media_id, None)

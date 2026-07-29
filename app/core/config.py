@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"
 
+    BACKEND_HOST: str = "0.0.0.0"
+    BACKEND_PORT: int = 8010
+    BACKEND_HEALTH_URL: str = "http://localhost:8010/health"
+    BACKEND_MONITOR_INTERVAL_SECONDS: float = 5.0
+    BACKEND_STARTUP_TIMEOUT_SECONDS: float = 20.0
+    BACKEND_RESTART_ATTEMPTS: int = 3
+    FRONTEND_CORS_ORIGINS: str = (
+        "http://127.0.0.1:5173,"
+        "http://localhost:5173,"
+        "tauri://localhost"
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

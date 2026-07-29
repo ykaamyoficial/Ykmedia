@@ -1,0 +1,34 @@
+{
+  "$schema": "../frontend/node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "YkMedia",
+  "version": "0.1.0",
+  "identifier": "br.com.ykmedia.desktop",
+  "build": {
+    "beforeDevCommand": "npm.cmd run dev --prefix ../frontend",
+    "beforeBuildCommand": "npm.cmd run build --prefix ../frontend",
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "YkMedia",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1000,
+        "minHeight": 650,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
+  }
+}

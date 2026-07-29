@@ -16,23 +16,29 @@ ENV/
 .env.*
 !.env.example
 
-data/
+/data/
 *.sqlite
 *.sqlite3
 *.db
 
-downloads/
-media/
-logs/
+/downloads/
+/media/
+/logs/
 
-desktop_screenshots/
-screenshots/
+/desktop_screenshots/
+/screenshots/
 *.log
 *.tmp
 *.temp
+/tmp-debug-flow/
 
-build/
-dist/
+/build/
+/dist/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+src-tauri/target/
+*.tsbuildinfo
 *.egg-info/
 *.spec
 

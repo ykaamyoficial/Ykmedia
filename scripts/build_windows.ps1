@@ -8,6 +8,7 @@ $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $iconPath = Join-Path $projectRoot "app\desktop\assets\ykmedia.ico"
 $entryPoint = Join-Path $projectRoot "app\desktop\__main__.py"
 $assetData = "app\desktop\assets;app\desktop\assets"
+$dockerData = "docker;docker"
 
 if (-not (Test-Path $iconPath)) {
     throw "Icone nao encontrado em: $iconPath"
@@ -24,6 +25,7 @@ try {
         --name YkMedia `
         --icon $iconPath `
         --add-data $assetData `
+        --add-data $dockerData `
         $entryPoint
 }
 finally {

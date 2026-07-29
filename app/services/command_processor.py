@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
-from app.core.config import settings
 from app.models.message import ReceivedMessage
 from app.services.conversation_engine import ConversationEngine
+from app.services.message_catalog import WhatsAppMessageCatalog
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,14 +12,6 @@ class CommandResult:
 
 
 class CommandProcessor:
-    _AVAILABLE_COMMANDS = {
-        "!ajuda": "Lista os comandos disponiveis.",
-        "!cancelar": "Cancela a conversa atual.",
-        "!status": "Mostra o estado atual da conversa.",
-        "!reiniciar": "Reinicia completamente a conversa.",
-        "!versao": "Exibe a versao do YkMedia.",
-    }
-
     def __init__(self, conversation_engine: ConversationEngine) -> None:
         self._conversation_engine = conversation_engine
 
@@ -31,39 +23,38 @@ class CommandProcessor:
 
         if command == "!cancelar":
             self._conversation_engine.reset(message.sender.remote_jid)
-            return CommandResult(command=command, response="Conversa cancelada.")
+            return CommandResult(command=command, response=WhatsAppMessageCatalog.command_cancelled())
 
         if command == "!status":
             session = self._conversation_engine.get_session(message.sender.remote_jid)
             if session is None:
-                return CommandResult(command=command, response="Nao ha conversa ativa.")
+                return CommandResult(
+                    command=command,
+                    response=WhatsAppMessageCatalog.command_no_active_conversation(),
+                )
 
             return CommandResult(
                 command=command,
-                response=f"Estado atual da conversa: {session.state.value}.",
+                response=WhatsAppMessageCatalog.command_status(session.state.value),
             )
 
         if command == "!reiniciar":
             self._conversation_engine.reset(message.sender.remote_jid)
-            return CommandResult(command=command, response="Conversa reiniciada.")
+            return CommandResult(command=command, response=WhatsAppMessageCatalog.command_restarted())
 
         if command == "!versao":
             return CommandResult(
                 command=command,
-                response=f"YkMedia {settings.APP_VERSION}",
+                response=WhatsAppMessageCatalog.command_version(),
             )
 
         return CommandResult(
             command=command,
-            response="Comando nao reconhecido. Envie !ajuda para ver os comandos disponiveis.",
+            response=WhatsAppMessageCatalog.command_unknown(),
         )
 
     def _normalize_command(self, text: str | None) -> str:
         return (text or "").strip().lower().split(maxsplit=1)[0]
 
     def _help_message(self) -> str:
-        command_lines = [
-            f"{command} - {description}"
-            for command, description in self._AVAILABLE_COMMANDS.items()
-        ]
-        return "Comandos disponiveis:\n" + "\n".join(command_lines)
+        return WhatsAppMessageCatalog.command_help()

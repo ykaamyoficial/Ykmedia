@@ -108,7 +108,7 @@ def _result(
     return ReceiveMediaResult(
         received_message=received_message,
         stored_file=stored_file,
-        conversation_state=ConversationState.WAITING_CATEGORY if received_message else None,
+        conversation_state=ConversationState.WAITING_CATEGORY_SELECTION if received_message else None,
         next_message="Recebi seu arquivo. Como deseja classifica-lo?" if received_message else None,
         errors=errors or [],
     )
@@ -150,7 +150,7 @@ def test_webhook_valid_text_payload() -> None:
     body = response.json()
     assert response.status_code == 200
     assert body["processed"] is True
-    assert body["conversation_state"] == "WAITING_CATEGORY"
+    assert body["conversation_state"] == ConversationState.WAITING_CATEGORY_SELECTION.value
     assert body["next_message"] == "Recebi seu arquivo. Como deseja classifica-lo?"
     assert body["has_file"] is False
     assert body["message_sent"] is True

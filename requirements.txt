@@ -5,4 +5,5 @@ httpx==0.28.1
 pytest==8.4.1
 yt-dlp
 PySide6
+qtawesome==1.4.2
 pyinstaller==6.21.0

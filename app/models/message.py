@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.models.interactive import IncomingInteraction
+
 
 class MessageType(StrEnum):
     TEXT = "texto"
@@ -9,6 +11,13 @@ class MessageType(StrEnum):
     AUDIO = "audio"
     VIDEO = "video"
     DOCUMENT = "documento"
+    STICKER = "sticker"
+    GIF = "gif"
+    CONTACT = "contato"
+    LOCATION = "localizacao"
+    LINK = "link"
+    EDITED = "editada"
+    REACTION = "reacao"
     UNKNOWN = "desconhecida"
 
 
@@ -16,6 +25,9 @@ class MessageType(StrEnum):
 class Sender:
     remote_jid: str
     is_from_me: bool = False
+    is_group: bool = False
+    display_name: str | None = None
+    profile_picture_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,3 +46,4 @@ class ReceivedMessage:
     raw_type: str
     text: str | None = None
     media: Media | None = None
+    interaction: IncomingInteraction | None = None

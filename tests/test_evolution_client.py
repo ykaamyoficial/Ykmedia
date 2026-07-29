@@ -3,6 +3,7 @@ import asyncio
 import httpx
 import pytest
 
+from app.models.interactive import InteractiveOption
 from app.models.message import Media, MessageType, ReceivedMessage, Sender
 from app.services.evolution_client import (
     EvolutionClient,
@@ -154,6 +155,72 @@ def test_send_text_message_rejects_empty_text() -> None:
         asyncio.run(client.send_text_message("556299999999@s.whatsapp.net", " "))
 
 
+def test_send_reply_buttons_uses_official_endpoint_and_payload() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.content.decode("utf-8")
+        return httpx.Response(status_code=201, json={"status": "PENDING"}, request=request)
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(
+        client.send_reply_buttons(
+            recipient="556299999999@s.whatsapp.net",
+            text="Escolha",
+            options=[InteractiveOption(id="filename:keep_original", title="Manter nome")],
+            footer="YkMedia",
+        )
+    )
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/message/sendButtons/ykmedia"
+    assert '"number":"556299999999"' in str(captured_request["json"])
+    assert '"type":"reply"' in str(captured_request["json"])
+    assert '"displayText":"Manter nome"' in str(captured_request["json"])
+    assert '"id":"filename:keep_original"' in str(captured_request["json"])
+    assert result == {"status": "PENDING"}
+
+
+def test_send_selection_list_uses_official_endpoint_and_payload() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.content.decode("utf-8")
+        return httpx.Response(status_code=201, json={"status": "PENDING"}, request=request)
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(
+        client.send_selection_list(
+            recipient="556299999999@s.whatsapp.net",
+            text="Categorias",
+            button_text="Ver categorias",
+            options=[InteractiveOption(id="category:1", title="Louvores")],
+            footer="YkMedia",
+        )
+    )
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/message/sendList/ykmedia"
+    assert '"buttonText":"Ver categorias"' in str(captured_request["json"])
+    assert '"rowId":"category:1"' in str(captured_request["json"])
+    assert '"description"' not in str(captured_request["json"])
+    assert result == {"status": "PENDING"}
+
+
 def test_connect_instance_uses_official_endpoint() -> None:
     captured_request: dict[str, object] = {}
 
@@ -177,6 +244,80 @@ def test_connect_instance_uses_official_endpoint() -> None:
     assert captured_request["method"] == "GET"
     assert captured_request["url_path"] == "/instance/connect/ykmedia"
     assert result == {"qrcode": {"base64": "data:image/png;base64,abc"}}
+
+
+def test_create_instance_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.content.decode("utf-8")
+        return httpx.Response(status_code=201, json={"instance": {"instanceName": "ykmedia"}}, request=request)
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.create_instance())
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/instance/create"
+    assert '"instanceName":"ykmedia"' in str(captured_request["json"])
+    assert result == {"instance": {"instanceName": "ykmedia"}}
+
+
+def test_set_webhook_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.content.decode("utf-8")
+        return httpx.Response(status_code=200, json={"webhook": {"enabled": True}}, request=request)
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.set_webhook("http://host.docker.internal:8010/webhooks/evolution", "secret"))
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/webhook/set/ykmedia"
+    assert '"base64":false' in str(captured_request["json"])
+    assert '"x-webhook-secret":"secret"' in str(captured_request["json"])
+    assert result == {"webhook": {"enabled": True}}
+
+
+def test_fetch_profile_picture_url_uses_official_endpoint() -> None:
+    captured_request: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url_path"] = request.url.path
+        captured_request["json"] = request.content.decode("utf-8")
+        return httpx.Response(
+            status_code=200,
+            json={"profilePictureUrl": "https://example.com/photo.jpg"},
+            request=request,
+        )
+
+    client = EvolutionClient(
+        base_url="http://evolution.test",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(client.fetch_profile_picture_url("556299999999@s.whatsapp.net"))
+
+    assert captured_request["method"] == "POST"
+    assert captured_request["url_path"] == "/chat/fetchProfilePictureUrl/ykmedia"
+    assert '"number":"556299999999"' in str(captured_request["json"])
+    assert result == {"profilePictureUrl": "https://example.com/photo.jpg"}
 
 
 def test_get_connection_state_uses_official_endpoint() -> None:

@@ -1,3 +1,4 @@
+import json
 import time
 from dataclasses import dataclass
 from threading import RLock
@@ -133,7 +134,18 @@ class SQLiteSessionStore:
                 state=session.state.value,
                 category=session.category,
                 filename=session.filename,
+                pending_media_id=self._encode_pending_media(session),
                 updated_at=self._now(),
+                allowed_option_ids=session.allowed_option_ids,
+                processed_interaction_ids=session.processed_interaction_ids,
+                interactive_created_at=session.interactive_created_at,
+                created_at=session.created_at,
+                expires_at=session.expires_at,
+                last_interaction_at=session.last_interaction_at,
+                origin=session.origin,
+                contact_id=session.contact_id,
+                greeting_sent=session.greeting_sent,
+                received_types=session.received_types,
             )
 
     def remove(self, sender_id: str) -> None:
@@ -153,10 +165,86 @@ class SQLiteSessionStore:
 
     def _row_to_session(self, row: dict[str, object]) -> ConversationSession:
         return ConversationSession(
-            state=ConversationState(str(row["state"])),
+            state=self._state_from_storage(str(row["state"])),
             category=str(row["category"]) if row.get("category") is not None else None,
             filename=str(row["filename"]) if row.get("filename") is not None else None,
+            pending_media_id=self._last_pending_media_id(row.get("pending_media_id")),
+            pending_media_ids=tuple(self._decode_pending_media(row.get("pending_media_id"))),
+            allowed_option_ids=tuple(self._decode_json_list(row.get("allowed_option_ids"))),
+            processed_interaction_ids=tuple(self._decode_json_list(row.get("processed_interaction_ids"))),
+            interactive_created_at=(
+                float(row["interactive_created_at"])
+                if row.get("interactive_created_at") is not None
+                else None
+            ),
+            created_at=(
+                float(row["created_at"])
+                if row.get("created_at") is not None
+                else None
+            ),
+            expires_at=(
+                float(row["expires_at"])
+                if row.get("expires_at") is not None
+                else None
+            ),
+            last_interaction_at=(
+                float(row["last_interaction_at"])
+                if row.get("last_interaction_at") is not None
+                else None
+            ),
+            origin=str(row["origin"]) if row.get("origin") is not None else None,
+            contact_id=str(row["contact_id"]) if row.get("contact_id") is not None else None,
+            greeting_sent=bool(row.get("greeting_sent")),
+            received_types=tuple(self._decode_json_list(row.get("received_types"))),
         )
 
     def _now(self) -> float:
         return time.time()
+
+    def _state_from_storage(self, state: str) -> ConversationState:
+        legacy_states = {
+            "FINISHED": ConversationState.FINISHED,
+            "PROCESSING": ConversationState.SAVING,
+            "WAITING_USAGE_CONFIRMATION": ConversationState.WAITING_CATEGORY_SELECTION,
+            "WAITING_CATEGORY": ConversationState.WAITING_CATEGORY_SELECTION,
+            "WAITING_CATEGORY_SELECTION": ConversationState.WAITING_CATEGORY_SELECTION,
+            "WAITING_FILENAME": ConversationState.WAITING_FILENAME_DECISION,
+            "WAITING_FILENAME_DECISION": ConversationState.WAITING_FILENAME_DECISION,
+            "WAITING_CUSTOM_FILENAME": ConversationState.WAITING_CUSTOM_FILENAME,
+            "WAITING_CONFIRMATION": ConversationState.WAITING_CONFIRMATION,
+        }
+        if state in legacy_states:
+            return legacy_states[state]
+        return ConversationState(state)
+
+    def _encode_pending_media(self, session: ConversationSession) -> str | None:
+        if session.pending_media_ids:
+            return json.dumps(list(session.pending_media_ids))
+        return session.pending_media_id
+
+    def _decode_pending_media(self, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, str):
+            return [str(value)]
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            return self._decode_json_list(text)
+        return [text]
+
+    def _last_pending_media_id(self, value: object) -> str | None:
+        pending_media = self._decode_pending_media(value)
+        return pending_media[-1] if pending_media else None
+
+    def _decode_json_list(self, value: object) -> list[str]:
+        if not isinstance(value, str) or not value:
+            return []
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(decoded, list):
+            return []
+        return [str(item) for item in decoded]
