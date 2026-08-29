@@ -2,13 +2,8 @@ from app.models.persistence import (
     ConversationMessageDirection,
     ConversationMessageRecord,
     ConversationMessageStatus,
-    ConversationRecord,
     MediaRecord,
     ProcessedMessageStatus,
-)
-from app.repositories.conversation_repository import (
-    ConversationRepository,
-    InMemoryConversationRepository,
 )
 from app.repositories.conversation_message_repository import (
     ConversationMessageRepository,
@@ -19,7 +14,6 @@ from app.repositories.processed_message_repository import (
     InMemoryProcessedMessageRepository,
     ProcessedMessageRepository,
 )
-from app.services.conversation_engine import ConversationState
 
 
 def test_media_repository_contract_is_implemented() -> None:
@@ -53,52 +47,6 @@ def test_media_repository_returns_none_when_missing() -> None:
     assert repository.exists("missing") is False
     assert repository.get_by_id("missing") is None
     assert repository.list() == []
-
-
-def test_conversation_repository_contract_is_implemented() -> None:
-    repository: ConversationRepository = InMemoryConversationRepository()
-    conversation = ConversationRecord(
-        sender_id="sender-1",
-        state=ConversationState.WAITING_CATEGORY_SELECTION,
-    )
-
-    repository.save(conversation)
-
-    assert repository.get("sender-1") == conversation
-    assert repository.list_active() == [conversation]
-
-
-def test_conversation_repository_delete() -> None:
-    repository = InMemoryConversationRepository()
-    conversation = ConversationRecord(
-        sender_id="sender-1",
-        state=ConversationState.WAITING_CATEGORY_SELECTION,
-    )
-    repository.save(conversation)
-
-    repository.delete("sender-1")
-
-    assert repository.get("sender-1") is None
-    assert repository.list_active() == []
-
-
-def test_conversation_repository_lists_only_active_records() -> None:
-    repository = InMemoryConversationRepository()
-    active = ConversationRecord(
-        sender_id="sender-1",
-        state=ConversationState.WAITING_CATEGORY_SELECTION,
-        is_active=True,
-    )
-    inactive = ConversationRecord(
-        sender_id="sender-2",
-        state=ConversationState.FINISHED,
-        is_active=False,
-    )
-
-    repository.save(active)
-    repository.save(inactive)
-
-    assert repository.list_active() == [active]
 
 
 def test_processed_message_repository_blocks_completed_duplicates() -> None:

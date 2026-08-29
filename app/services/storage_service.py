@@ -312,6 +312,127 @@ class StorageService:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def save_pending_media(
+        self,
+        message_id: str,
+        sender: str,
+        file_name: str | None,
+        mimetype: str,
+        size_bytes: int,
+        staging_path: str,
+        created_at: float,
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO pending_media (
+                    message_id, sender, file_name, mimetype, size_bytes, staging_path, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO UPDATE SET
+                    sender = excluded.sender,
+                    file_name = excluded.file_name,
+                    mimetype = excluded.mimetype,
+                    size_bytes = excluded.size_bytes,
+                    staging_path = excluded.staging_path,
+                    created_at = excluded.created_at
+                """,
+                (message_id, sender, file_name, mimetype, size_bytes, staging_path, created_at),
+            )
+
+    def get_pending_media(self, message_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM pending_media WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+    def list_pending_media_before(self, cutoff: float) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM pending_media WHERE created_at < ?",
+                (cutoff,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_pending_media(self, message_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM pending_media WHERE message_id = ?",
+                (message_id,),
+            )
+
+    def delete_pending_media_before(self, cutoff: float) -> int:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM pending_media WHERE created_at < ?",
+                (cutoff,),
+            )
+            return cursor.rowcount
+
+    def save_media_record(
+        self,
+        media_id: str,
+        message_id: str,
+        file_name: str,
+        relative_path: str,
+        mimetype: str | None,
+        size_bytes: int,
+        sha256: str,
+        absolute_path: str | None,
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO media_records (
+                    media_id, message_id, file_name, relative_path, mimetype,
+                    size_bytes, sha256, absolute_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(media_id) DO UPDATE SET
+                    message_id = excluded.message_id,
+                    file_name = excluded.file_name,
+                    relative_path = excluded.relative_path,
+                    mimetype = excluded.mimetype,
+                    size_bytes = excluded.size_bytes,
+                    sha256 = excluded.sha256,
+                    absolute_path = excluded.absolute_path
+                """,
+                (
+                    media_id,
+                    message_id,
+                    file_name,
+                    relative_path,
+                    mimetype,
+                    size_bytes,
+                    sha256,
+                    absolute_path,
+                ),
+            )
+
+    def get_media_record(self, media_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM media_records WHERE media_id = ?",
+                (media_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+    def list_media_records(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM media_records ORDER BY rowid ASC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_media_record(self, media_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM media_records WHERE media_id = ?",
+                (media_id,),
+            )
+
     def save_processed_message(
         self,
         message_id: str,
@@ -767,8 +888,32 @@ class StorageService:
                     error TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS pending_media (
+                    message_id TEXT PRIMARY KEY,
+                    sender TEXT NOT NULL,
+                    file_name TEXT,
+                    mimetype TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    staging_path TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS media_records (
+                    media_id TEXT PRIMARY KEY,
+                    message_id TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    mimetype TEXT,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    absolute_path TEXT
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_conversation_messages_sender_created
                     ON conversation_messages (sender, created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_pending_media_sender
+                    ON pending_media (sender);
                 """
             )
             self._ensure_column(

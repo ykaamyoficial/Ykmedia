@@ -11,13 +11,14 @@ from app.models.persistence import (
 )
 from app.models.message import MessageType, ReceivedMessage
 from app.repositories.conversation_message_repository import InMemoryConversationMessageRepository
-from app.repositories.media_repository import InMemoryMediaRepository
+from app.repositories.media_repository import InMemoryMediaRepository, SQLiteMediaRepository
+from app.repositories.pending_media_repository import SQLitePendingMediaRepository
 from app.services.command_processor import CommandProcessor
 from app.services.conversation_engine import ConversationEngine, ConversationState
 from app.services.file_storage import FileStorage
 from app.services.message_pipeline import MessagePipeline
 from app.services.receive_media_use_case import ReceiveMediaUseCase
-from app.services.session_store import MemorySessionStore
+from app.services.session_store import MemorySessionStore, SQLiteSessionStore
 from app.services.storage_service import StorageService
 
 
@@ -497,3 +498,38 @@ def test_execute_runs_distinct_senders_concurrently(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
     assert max_active == 2
+
+
+def _persistent_use_case(tmp_path: Path) -> ReceiveMediaUseCase:
+    storage = StorageService(database_path=tmp_path / "ykmedia.sqlite3")
+    file_storage = FileStorage(root_directory=tmp_path / "media")
+    engine = ConversationEngine(session_store=SQLiteSessionStore(storage_service=storage))
+    pipeline = MessagePipeline(
+        download_manager=FakeDownloadManager(),
+        file_storage=file_storage,
+        conversation_engine=engine,
+    )
+    return ReceiveMediaUseCase(
+        message_pipeline=pipeline,
+        media_repository=SQLiteMediaRepository(storage),
+        pending_media_repository=SQLitePendingMediaRepository(storage, tmp_path / "media"),
+        media_history_recorder=storage,
+        file_storage=file_storage,
+        media_grouping_window_seconds=0,
+    )
+
+
+def test_pending_media_survives_backend_restart(tmp_path: Path) -> None:
+    before_restart = _persistent_use_case(tmp_path)
+    asyncio.run(
+        before_restart.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1"))
+    )
+    asyncio.run(before_restart.execute(_payload({"conversation": "1"}, "CAT1")))
+
+    # Nova instancia (reinicio): mesmo banco e mesmo disco de staging.
+    after_restart = _persistent_use_case(tmp_path)
+    result = asyncio.run(after_restart.execute(_payload({"conversation": "1"}, "NAME1")))
+
+    assert result.conversation_state is ConversationState.FINISHED
+    assert result.stored_file is not None
+    assert Path(result.stored_file.absolute_path).exists()

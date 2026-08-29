@@ -1,12 +1,19 @@
-from app.repositories.conversation_repository import (
-    ConversationRepository,
-    InMemoryConversationRepository,
+from app.repositories.media_repository import (
+    InMemoryMediaRepository,
+    MediaRepository,
+    SQLiteMediaRepository,
 )
-from app.repositories.media_repository import InMemoryMediaRepository, MediaRepository
+from app.repositories.pending_media_repository import (
+    InMemoryPendingMediaRepository,
+    PendingMediaRepository,
+    SQLitePendingMediaRepository,
+)
 
 __all__ = [
-    "ConversationRepository",
-    "InMemoryConversationRepository",
     "InMemoryMediaRepository",
+    "InMemoryPendingMediaRepository",
     "MediaRepository",
+    "PendingMediaRepository",
+    "SQLiteMediaRepository",
+    "SQLitePendingMediaRepository",
 ]
