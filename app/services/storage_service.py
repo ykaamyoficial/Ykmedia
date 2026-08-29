@@ -156,28 +156,46 @@ class StorageService:
         status: str,
         payload: dict[str, Any],
         error: str | None = None,
+        attempts: int = 0,
+        next_attempt_at: str | None = None,
     ) -> None:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO processing_jobs (id, sender, origin, created_at, status, payload, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO processing_jobs (
+                    id, sender, origin, created_at, status, payload, error,
+                    attempts, next_attempt_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender = excluded.sender,
                     origin = excluded.origin,
                     created_at = excluded.created_at,
                     status = excluded.status,
                     payload = excluded.payload,
-                    error = excluded.error
+                    error = excluded.error,
+                    attempts = excluded.attempts,
+                    next_attempt_at = excluded.next_attempt_at
                 """,
-                (job_id, sender, origin, created_at, status, json.dumps(payload), error),
+                (
+                    job_id,
+                    sender,
+                    origin,
+                    created_at,
+                    status,
+                    json.dumps(payload),
+                    error,
+                    attempts,
+                    next_attempt_at,
+                ),
             )
 
     def list_processing_jobs(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, sender, origin, created_at, status, payload, error
+                SELECT id, sender, origin, created_at, status, payload, error,
+                       attempts, next_attempt_at
                 FROM processing_jobs
                 ORDER BY created_at ASC
                 """
@@ -844,7 +862,9 @@ class StorageService:
                     created_at TEXT NOT NULL,
                     status TEXT NOT NULL,
                     payload TEXT NOT NULL,
-                    error TEXT
+                    error TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS media_history (
@@ -915,6 +935,18 @@ class StorageService:
                 CREATE INDEX IF NOT EXISTS idx_pending_media_sender
                     ON pending_media (sender);
                 """
+            )
+            self._ensure_column(
+                connection=connection,
+                table_name="processing_jobs",
+                column_name="attempts",
+                definition="INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                connection=connection,
+                table_name="processing_jobs",
+                column_name="next_attempt_at",
+                definition="TEXT",
             )
             self._ensure_column(
                 connection=connection,

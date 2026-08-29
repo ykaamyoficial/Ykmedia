@@ -31,6 +31,7 @@ from app.services.history_query_service import HistoryQueryService
 from app.services.message_pipeline import MessagePipeline
 from app.services.message_response_sender import MessageResponseSender
 from app.services.processing_queue import ProcessingQueue, ProcessingWorker
+from app.services.queue_retry_worker import QueueRetryWorker, WebhookJobReprocessor
 from app.services.receive_media_use_case import ReceiveMediaUseCase
 from app.services.session_store import SQLiteSessionStore
 from app.services.settings_query_service import SettingsQueryService
@@ -106,6 +107,17 @@ def get_processing_queue() -> ProcessingQueue:
 @lru_cache(maxsize=1)
 def get_processing_worker() -> ProcessingWorker:
     return ProcessingWorker()
+
+
+@lru_cache(maxsize=1)
+def get_queue_retry_worker() -> QueueRetryWorker:
+    return QueueRetryWorker(
+        queue=get_processing_queue(),
+        reprocessor=WebhookJobReprocessor(
+            use_case=get_receive_media_use_case(),
+            response_sender=get_message_response_sender(),
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

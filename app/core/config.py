@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"
 
+    # Worker de fundo que reprocessa jobs que falharam por causas transitorias.
+    QUEUE_RETRY_WORKER_ENABLED: bool = True
+
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8010
     BACKEND_HEALTH_URL: str = "http://localhost:8010/health"

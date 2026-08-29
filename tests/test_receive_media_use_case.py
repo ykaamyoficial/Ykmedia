@@ -441,13 +441,13 @@ def test_execute_serializes_concurrent_webhooks_from_same_sender(tmp_path: Path)
     max_active = 0
     original = use_case._execute
 
-    async def tracking_execute(payload: dict[str, Any], slot=None):
+    async def tracking_execute(payload: dict[str, Any], slot=None, *, enqueue=True):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
         try:
             await asyncio.sleep(0.02)
-            return await original(payload, slot)
+            return await original(payload, slot, enqueue=enqueue)
         finally:
             active -= 1
 
@@ -473,13 +473,13 @@ def test_execute_runs_distinct_senders_concurrently(tmp_path: Path) -> None:
     max_active = 0
     original = use_case._execute
 
-    async def tracking_execute(payload: dict[str, Any], slot=None):
+    async def tracking_execute(payload: dict[str, Any], slot=None, *, enqueue=True):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
         try:
             await asyncio.sleep(0.02)
-            return await original(payload, slot)
+            return await original(payload, slot, enqueue=enqueue)
         finally:
             active -= 1
 

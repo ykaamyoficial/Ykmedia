@@ -102,10 +102,15 @@ class ReceiveMediaUseCase:
         )
         self._sender_slots: dict[str, _SenderSlot] = {}
 
-    async def execute(self, payload: dict[str, Any]) -> ReceiveMediaResult:
+    async def execute(
+        self,
+        payload: dict[str, Any],
+        *,
+        enqueue: bool = True,
+    ) -> ReceiveMediaResult:
         sender_id = self._extract_sender(payload)
         if not sender_id:
-            return await self._execute(payload)
+            return await self._execute(payload, enqueue=enqueue)
 
         slot = self._sender_slots.get(sender_id)
         if slot is None:
@@ -114,7 +119,7 @@ class ReceiveMediaUseCase:
         slot.waiters += 1
         await slot.lock.acquire()
         try:
-            return await self._execute(payload, slot)
+            return await self._execute(payload, slot, enqueue=enqueue)
         finally:
             if slot.lock.locked():
                 slot.lock.release()
@@ -126,11 +131,13 @@ class ReceiveMediaUseCase:
         self,
         payload: dict[str, Any],
         slot: "_SenderSlot | None" = None,
+        *,
+        enqueue: bool = True,
     ) -> ReceiveMediaResult:
         previous_pending_media_ids = self._get_pending_media_ids_from_sender(
             self._extract_sender(payload)
         )
-        pipeline_result = await self._message_pipeline.process_event(payload)
+        pipeline_result = await self._message_pipeline.process_event(payload, enqueue=enqueue)
         conversation_result = pipeline_result.conversation_result
         command_result = pipeline_result.command_result
         received_message = pipeline_result.received_message

@@ -203,6 +203,45 @@ def test_records_download_failure_and_continues_to_conversation() -> None:
     assert file_storage.calls == 0
 
 
+def test_download_failure_schedules_a_retry() -> None:
+    from app.services.processing_queue import ProcessingJobStatus, ProcessingQueue
+
+    queue = ProcessingQueue()
+    download_manager = FakeDownloadManager(RuntimeError("evolution fora do ar"))
+    pipeline = MessagePipeline(
+        download_manager=download_manager,
+        file_storage=FakeFileStorage(_stored_file()),
+        conversation_engine=ConversationEngine(session_store=MemorySessionStore()),
+        processing_queue=queue,
+    )
+
+    asyncio.run(pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}})))
+
+    job = queue.list_jobs()[0]
+    assert job.status is ProcessingJobStatus.RETRYING
+    assert job.attempts == 1
+    assert job.next_attempt_at is not None
+
+
+def test_enqueue_false_does_not_touch_the_queue() -> None:
+    from app.services.processing_queue import ProcessingQueue
+
+    queue = ProcessingQueue()
+    pipeline = MessagePipeline(
+        download_manager=FakeDownloadManager(_downloaded_media()),
+        file_storage=FakeFileStorage(_stored_file()),
+        conversation_engine=ConversationEngine(session_store=MemorySessionStore()),
+        processing_queue=queue,
+    )
+
+    result = asyncio.run(
+        pipeline.process_event(_payload({"conversation": "Ola"}), enqueue=False)
+    )
+
+    assert result.received_message is not None
+    assert queue.list_jobs() == []
+
+
 def test_does_not_store_media_before_user_confirmation() -> None:
     downloaded_media = _downloaded_media()
     pipeline, download_manager, file_storage = _pipeline(

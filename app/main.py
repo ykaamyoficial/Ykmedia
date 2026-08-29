@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,10 +28,26 @@ def _cors_origins() -> list[str]:
     return list(dict.fromkeys([*configured_origins, *_TAURI_CORS_ORIGINS]))
 
 
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    worker = None
+    if settings.QUEUE_RETRY_WORKER_ENABLED:
+        from app.services.application_factory import get_queue_retry_worker
+
+        worker = get_queue_retry_worker()
+        worker.start()
+    try:
+        yield
+    finally:
+        if worker is not None:
+            await worker.stop()
+
+
 def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
+        lifespan=_lifespan,
     )
 
     application.add_middleware(
