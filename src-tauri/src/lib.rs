@@ -143,6 +143,7 @@ fn start_backend_sidecar(
     }
 
     let runtime_root = runtime_root()?;
+    rotate_backend_log(&runtime_root);
     let stdout = backend_log_stream(&runtime_root);
     let stderr = backend_log_stream(&runtime_root);
     let mut command = Command::new(sidecar);
@@ -169,6 +170,24 @@ fn backend_log_stream(runtime_root: &Path) -> Stdio {
         .and_then(|_| OpenOptions::new().create(true).append(true).open(log_file))
         .map(Stdio::from)
         .unwrap_or_else(|_| Stdio::null())
+}
+
+/// Mantem `backend.log` limitado: quando passa de ~5 MB no arranque, vira
+/// `backend.log.1` (um backup). O log e escrito pelo processo filho em modo
+/// append, entao rotacionar antes de abrir o stream evita corrida.
+fn rotate_backend_log(runtime_root: &Path) {
+    const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+    let log_file = runtime_root.join("logs").join("backend.log");
+    let exceeds_limit = fs::metadata(&log_file)
+        .map(|meta| meta.len() > MAX_LOG_BYTES)
+        .unwrap_or(false);
+    if !exceeds_limit {
+        return;
+    }
+
+    let rotated = runtime_root.join("logs").join("backend.log.1");
+    let _ = fs::remove_file(&rotated);
+    let _ = fs::rename(&log_file, &rotated);
 }
 
 fn stop_backend_sidecar(state: &BackendSidecarState) {
