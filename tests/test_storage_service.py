@@ -264,6 +264,40 @@ def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
     assert restored_session.interactive_created_at == 123.0
 
 
+def test_adds_retry_columns_to_existing_processing_jobs_table(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE processing_jobs (
+                id TEXT PRIMARY KEY,
+                sender TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                error TEXT
+            )
+            """
+        )
+
+    storage = StorageService(database_path=database_path)
+    storage.save_processing_job(
+        job_id="job-1",
+        sender="s",
+        origin="WhatsApp",
+        created_at="2026-08-29T10:00:00+00:00",
+        status="REPROCESSANDO",
+        payload={"ok": True},
+        attempts=2,
+        next_attempt_at="2026-08-29T10:05:00+00:00",
+    )
+
+    row = storage.list_processing_jobs()[0]
+    assert row["attempts"] == 2
+    assert row["next_attempt_at"] == "2026-08-29T10:05:00+00:00"
+
+
 def test_adds_pending_media_column_to_existing_database(tmp_path: Path) -> None:
     database_path = tmp_path / "ykmedia.sqlite3"
     with sqlite3.connect(database_path) as connection:

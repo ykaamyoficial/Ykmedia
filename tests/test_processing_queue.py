@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -82,6 +83,51 @@ def test_multiple_consecutive_download_jobs() -> None:
 
     assert results == [0, 1, 2, 3, 4]
     assert queue.pending_count() == 0
+
+
+def test_schedule_retry_uses_backoff_then_dead_letters() -> None:
+    queue = ProcessingQueue()
+    job = queue.enqueue("s", ProcessingJobOrigin.WHATSAPP, {"i": 1})
+    queue.dequeue()
+
+    for expected_attempt in range(1, ProcessingQueue.MAX_ATTEMPTS):
+        assert queue.schedule_retry(job, "download: falha") is True
+        assert job.status is ProcessingJobStatus.RETRYING
+        assert job.attempts == expected_attempt
+        assert job.next_attempt_at is not None
+
+    assert queue.schedule_retry(job, "download: falha") is False
+    assert job.status is ProcessingJobStatus.DEAD_LETTER
+    assert queue.list_dead_letter() == [job]
+
+
+def test_claim_due_retries_returns_only_due_jobs() -> None:
+    queue = ProcessingQueue()
+    job = queue.enqueue("s", ProcessingJobOrigin.WHATSAPP, {"i": 1})
+    queue.dequeue()
+    queue.schedule_retry(job, "download: falha")  # agenda ~30s no futuro
+
+    assert queue.claim_due_retries() == []
+
+    job.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    claimed = queue.claim_due_retries()
+
+    assert claimed == [job]
+    assert job.status is ProcessingJobStatus.PROCESSING
+
+
+def test_requeue_brings_a_dead_letter_job_back() -> None:
+    queue = ProcessingQueue()
+    job = queue.enqueue("s", ProcessingJobOrigin.WHATSAPP, {"i": 1})
+    queue.dequeue()
+    for _ in range(ProcessingQueue.MAX_ATTEMPTS):
+        queue.schedule_retry(job, "download: falha")
+    assert job.status is ProcessingJobStatus.DEAD_LETTER
+
+    assert queue.requeue(job.id) is True
+    assert job.status is ProcessingJobStatus.PENDING
+    assert job.attempts == 0
+    assert queue.dequeue() is job
 
 
 def test_clear_completed_jobs() -> None:

@@ -95,7 +95,18 @@ class MessagePipeline:
         self._payload_mapper = payload_mapper
         self._message_processor = message_processor
 
-    async def process_event(self, payload: dict[str, Any]) -> PipelineResult:
+    #: Prefixos de erro considerados transitorios (vale reprocessar depois).
+    RETRYABLE_ERROR_PREFIXES = ("download:", "youtube:", "storage:")
+
+    async def process_event(
+        self,
+        payload: dict[str, Any],
+        *,
+        enqueue: bool = True,
+    ) -> PipelineResult:
+        if not enqueue:
+            return await self._process_payload(payload)
+
         job = self._processing_queue.enqueue(
             sender=self._extract_sender(payload),
             origin=self._detect_origin(payload),
@@ -106,6 +117,7 @@ class MessagePipeline:
             handler=self._process_job,
         )
         if isinstance(result, PipelineResult):
+            self._schedule_retry_if_needed(job, result)
             return result
 
         return PipelineResult(
@@ -116,6 +128,15 @@ class MessagePipeline:
             conversation_result=None,
             errors=[f"queue: trabalho {job.id} nao retornou resultado valido"],
         )
+
+    def _schedule_retry_if_needed(self, job: ProcessingJob, result: PipelineResult) -> None:
+        retryable = [
+            error
+            for error in result.errors
+            if error.startswith(self.RETRYABLE_ERROR_PREFIXES)
+        ]
+        if retryable:
+            self._processing_queue.schedule_retry(job, "; ".join(retryable))
 
     async def _process_job(self, job: ProcessingJob) -> PipelineResult:
         return await self._process_payload(job.payload)
