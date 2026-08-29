@@ -94,6 +94,26 @@ function messagesPayload() {
   };
 }
 
+function mediaMessage(id: string, name: string, createdAt: string) {
+  return {
+    id,
+    conversation_id: "abc",
+    direction: "INBOUND",
+    message_type: "image",
+    content: name,
+    created_at: createdAt,
+    status: "RECEBIDA",
+    sender_name: "Maria",
+    media_metadata: {
+      media_id: id,
+      file_name: name,
+      file_path: `C:\\YkMedia\\Louvores\\${name}`,
+      size: 2048,
+      exists: true,
+    },
+  };
+}
+
 function wrapper(children: ReactNode, initialPath = "/conversas") {
   const queryClient = createAppQueryClient();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: 0 } });
@@ -182,5 +202,111 @@ describe("ConversationsPage", () => {
 
     expect(screen.getByText("Sem conexao")).toBeInTheDocument();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("keeps contacts and file timeline in independent scroll containers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(conversationListPayload()) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(detailPayload()) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(messagesPayload()) }),
+    );
+
+    const { container } = wrapper(<ConversationsPage />, "/conversas/abc");
+
+    await waitFor(() => expect(screen.getByText("foto-culto.jpg")).toBeInTheDocument());
+
+    const scrollContainers = Array.from(container.querySelectorAll(".overflow-auto"));
+    const contactsScroll = scrollContainers.find((element) => element.textContent?.includes("Maria"));
+    const filesScroll = scrollContainers.find((element) => element.textContent?.includes("foto-culto.jpg"));
+
+    expect(contactsScroll).toBeDefined();
+    expect(filesScroll).toBeDefined();
+    expect(contactsScroll).not.toBe(filesScroll);
+
+    if (contactsScroll && filesScroll) {
+      contactsScroll.scrollTop = 40;
+      expect(filesScroll.scrollTop).toBe(0);
+    }
+  });
+
+  it("filters the timeline by file search without reintroducing text messages", async () => {
+    const twoFilesPayload = {
+      items: [
+        mediaMessage("msg-1", "foto-culto.jpg", "2026-07-29T10:02:00+00:00"),
+        mediaMessage("msg-2", "roteiro.pdf", "2026-07-29T10:03:00+00:00"),
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      has_next: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(conversationListPayload()) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(detailPayload()) })
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(twoFilesPayload) }),
+    );
+    const user = userEvent.setup();
+
+    wrapper(<ConversationsPage />, "/conversas/abc");
+
+    await waitFor(() => expect(screen.getByText("roteiro.pdf")).toBeInTheDocument());
+    expect(screen.getByText("foto-culto.jpg")).toBeInTheDocument();
+
+    await user.type(
+      screen.getByPlaceholderText("Buscar por arquivo, extensao, categoria ou remetente..."),
+      "roteiro",
+    );
+
+    expect(screen.getByText("roteiro.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("foto-culto.jpg")).not.toBeInTheDocument();
+  });
+
+  it("loads older files without duplicating already loaded items", async () => {
+    const pageOne = {
+      items: [mediaMessage("msg-1", "recente.jpg", "2026-07-29T10:05:00+00:00")],
+      total: 2,
+      page: 1,
+      page_size: 50,
+      has_next: true,
+    };
+    const pageTwo = {
+      items: [mediaMessage("msg-2", "antigo.jpg", "2026-07-29T09:00:00+00:00")],
+      total: 2,
+      page: 2,
+      page_size: 50,
+      has_next: false,
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/conversations/abc/messages")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(url.includes("page=2") ? pageTwo : pageOne),
+          });
+        }
+        if (url.includes("/conversations/abc")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(detailPayload()) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(conversationListPayload()) });
+      }),
+    );
+    const user = userEvent.setup();
+
+    wrapper(<ConversationsPage />, "/conversas/abc");
+
+    await waitFor(() => expect(screen.getByText("recente.jpg")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /carregar anteriores/i }));
+
+    await waitFor(() => expect(screen.getByText("antigo.jpg")).toBeInTheDocument());
+    expect(screen.getAllByText("recente.jpg")).toHaveLength(1);
+    expect(screen.getAllByText("antigo.jpg")).toHaveLength(1);
   });
 });

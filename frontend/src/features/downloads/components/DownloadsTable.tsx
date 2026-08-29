@@ -3,7 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { YkDataTable } from "@/shared/tables";
 import { type DownloadJobItem } from "@/features/downloads/types";
-import { DownloadStatusBadge } from "@/features/downloads/components/DownloadStatusBadge";
+import { MediaName, MediaStatusBadge, MediaTypeIcon } from "@/shared/media";
 
 type DownloadsTableProps = {
   jobs: DownloadJobItem[];
@@ -14,6 +14,16 @@ export function DownloadsTable({ jobs, loading = false }: DownloadsTableProps) {
   const columns = useMemo<Array<ColumnDef<DownloadJobItem>>>(
     () => [
       {
+        accessorKey: "file",
+        header: "Arquivo",
+        cell: ({ row }) => (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <MediaTypeIcon kind={row.original.kind} size="sm" />
+            <MediaName name={row.original.file} className="max-w-80" />
+          </div>
+        ),
+      },
+      {
         accessorKey: "sender",
         header: "Remetente",
         cell: ({ row }) => <span className="font-medium">{row.original.sender}</span>,
@@ -23,18 +33,13 @@ export function DownloadsTable({ jobs, loading = false }: DownloadsTableProps) {
         header: "Origem",
       },
       {
-        accessorKey: "file",
-        header: "Arquivo",
-        cell: ({ row }) => <span className="block max-w-80 truncate">{row.original.file}</span>,
-      },
-      {
         accessorKey: "kind",
         header: "Tipo",
       },
       {
         accessorKey: "status",
         header: "Status",
-        cell: ({ row }) => <DownloadStatusBadge status={row.original.status} />,
+        cell: ({ row }) => <MediaStatusBadge status={row.original.status} />,
       },
       {
         accessorKey: "created_at",

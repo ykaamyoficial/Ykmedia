@@ -1,4 +1,3 @@
-import subprocess
 from pathlib import Path
 
 from app.services.backend_runtime_manager import BackendRuntimeSnapshot, BackendRuntimeState
@@ -12,6 +11,7 @@ from app.services.configuration_manager import (
 )
 from app.services.diagnostic_service import DiagnosticReport, DiagnosticStatus
 from app.services.environment_manager import EnvironmentCheck, EnvironmentStatus
+from app.services.evolution_client import EvolutionConnectionError, EvolutionHttpError
 
 
 class FakeEnvironmentManager:
@@ -55,7 +55,7 @@ class FakeEvolutionClient:
 
     async def get_connection_state(self) -> dict[str, object]:
         if self.connection_fails:
-            raise RuntimeError("missing")
+            raise EvolutionHttpError(404, "Evolution API returned HTTP 404.")
         return {"instance": {"state": "open"}}
 
     async def create_instance(self) -> dict[str, object]:
@@ -65,6 +65,23 @@ class FakeEvolutionClient:
     async def set_webhook(self, url: str, webhook_secret: str = "", events: list[str] | None = None) -> dict[str, object]:
         self.webhook_url = url
         return {"webhook": {"enabled": True}}
+
+
+class DelayedEvolutionClient(FakeEvolutionClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    async def get_connection_state(self) -> dict[str, object]:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise EvolutionConnectionError("starting")
+        return {"instance": {"state": "open"}}
+
+
+class UnexpectedEvolutionErrorClient(FakeEvolutionClient):
+    async def get_connection_state(self) -> dict[str, object]:
+        raise EvolutionHttpError(500, "Evolution API returned HTTP 500.")
 
 
 def test_configuration_manager_creates_env_and_directories(tmp_path: Path, monkeypatch) -> None:
@@ -85,6 +102,7 @@ def test_configuration_manager_creates_env_and_directories(tmp_path: Path, monke
 
 def test_ffmpeg_manager_detects_project_binary(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("app.services.configuration_manager.shutil.which", lambda command: None)
     ffmpeg = tmp_path / "bin" / "ffmpeg.exe"
     ffmpeg.parent.mkdir()
     ffmpeg.write_text("fake", encoding="utf-8")
@@ -105,6 +123,33 @@ def test_evolution_provisioning_creates_missing_instance_and_sets_webhook() -> N
     assert result.status is SetupStepStatus.OK
     assert client.created is True
     assert client.webhook_url == "http://host.docker.internal:8010/webhooks/evolution"
+
+
+def test_evolution_provisioning_retries_while_api_is_starting() -> None:
+    client = DelayedEvolutionClient()
+    delays: list[float] = []
+    manager = EvolutionProvisioningManager(
+        client,
+        readiness_attempts=2,
+        retry_delay_seconds=0.1,
+        sleep=delays.append,
+    )
+
+    result = manager.provision()
+
+    assert result.status is SetupStepStatus.OK
+    assert client.attempts == 2
+    assert delays == [0.1]
+
+
+def test_evolution_provisioning_does_not_create_instance_after_unexpected_http_error() -> None:
+    client = UnexpectedEvolutionErrorClient()
+    manager = EvolutionProvisioningManager(client, readiness_attempts=1)
+
+    result = manager.provision()
+
+    assert result.status is SetupStepStatus.ERROR
+    assert client.created is False
 
 
 def test_automatic_setup_orchestrates_all_steps(tmp_path: Path, monkeypatch) -> None:

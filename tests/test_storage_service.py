@@ -23,6 +23,16 @@ def test_creates_database_automatically(tmp_path: Path) -> None:
     assert database_path.exists()
 
 
+def test_enables_wal_and_busy_timeout(tmp_path: Path) -> None:
+    database_path = tmp_path / "ykmedia.sqlite3"
+    StorageService(database_path=database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert journal_mode.lower() == "wal"
+
+
 def test_persists_categories_after_restart(tmp_path: Path) -> None:
     database_path = tmp_path / "ykmedia.sqlite3"
     storage = StorageService(database_path=database_path)
@@ -116,6 +126,33 @@ def test_lists_media_contacts_and_files_by_sender(tmp_path: Path) -> None:
     assert contacts[0]["media_count"] == 2
     assert contacts[0]["last_media"] == "imagem.jpg"
     assert [file["final_name"] for file in files] == ["imagem.jpg", "louvor.mp3"]
+
+
+def test_lists_latest_media_by_insertion_order_when_dates_match(tmp_path: Path) -> None:
+    storage = StorageService(database_path=tmp_path / "ykmedia.sqlite3")
+    same_date = "2026-07-29T22:42:00+00:00"
+
+    for history_id, final_name in (
+        ("hist-1", "001.mp4"),
+        ("hist-2", "002.mp3"),
+        ("hist-3", "003.pdf"),
+    ):
+        storage.save_media_history(
+            history_id=history_id,
+            date=same_date,
+            sender="556288888888@s.whatsapp.net",
+            origin="WhatsApp",
+            category="Mensagens",
+            final_name=final_name,
+            file_path=f"Mensagens/Sessao/{final_name}",
+            status="CONCLUIDO",
+        )
+
+    contacts = storage.list_media_contacts()
+    files = storage.list_media_by_sender("556288888888@s.whatsapp.net")
+
+    assert contacts[0]["last_media"] == "003.pdf"
+    assert [file["final_name"] for file in files] == ["003.pdf", "002.mp3", "001.mp4"]
 
 
 def test_persists_contact_profile(tmp_path: Path) -> None:

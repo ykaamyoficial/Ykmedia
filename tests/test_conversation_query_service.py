@@ -86,6 +86,32 @@ def test_get_conversation_returns_details_and_profile_photo_without_requiring_fi
     assert details.message_count == 1
 
 
+def test_get_conversation_counts_media_files_not_total_messages(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    sender = "5562999999999@s.whatsapp.net"
+    _message(storage, "msg-1", sender, "ola", "2026-07-29T10:00:00+00:00")
+    _message(storage, "msg-2", sender, "tudo bem?", "2026-07-29T10:01:00+00:00")
+    _message(storage, "msg-3", sender, "!ajuda", "2026-07-29T10:02:00+00:00")
+    media_file = tmp_path / "media" / "Louvores" / "foto.jpg"
+    media_file.parent.mkdir(parents=True)
+    media_file.write_bytes(b"image")
+    storage.save_media_history(
+        history_id="history-1",
+        date="2026-07-29T10:05:00+00:00",
+        sender=sender,
+        origin="WhatsApp",
+        category="Louvores",
+        final_name="foto.jpg",
+        file_path=str(media_file),
+        status="CONCLUIDO",
+    )
+
+    conversation = ConversationQueryService(storage).list_conversations().items[0]
+    details = ConversationQueryService(storage).get_conversation(conversation.id)
+
+    assert details.message_count == 1
+
+
 def test_list_messages_returns_recent_page_in_visual_chronological_order(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     sender = "5562999999999@s.whatsapp.net"

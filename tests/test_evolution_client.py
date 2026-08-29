@@ -5,6 +5,7 @@ import pytest
 
 from app.models.interactive import InteractiveOption
 from app.models.message import Media, MessageType, ReceivedMessage, Sender
+from app.core.config import settings
 from app.services.evolution_client import (
     EvolutionClient,
     EvolutionConnectionError,
@@ -60,6 +61,22 @@ def test_health_sends_api_key_header() -> None:
     asyncio.run(client.health())
 
     assert captured_headers["apikey"] == "test-key"
+
+
+def test_client_uses_current_runtime_api_key_when_no_explicit_key_is_supplied(monkeypatch) -> None:
+    captured_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers["apikey"] = request.headers["apikey"]
+        return httpx.Response(status_code=200, json={"status": "ok"}, request=request)
+
+    monkeypatch.setattr(settings, "EVOLUTION_API_KEY", "initial-key")
+    client = EvolutionClient(base_url="http://evolution.test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(settings, "EVOLUTION_API_KEY", "prepared-key")
+
+    asyncio.run(client.health())
+
+    assert captured_headers["apikey"] == "prepared-key"
 
 
 def test_client_uses_configurable_timeout() -> None:
@@ -266,6 +283,7 @@ def test_create_instance_uses_official_endpoint() -> None:
     assert captured_request["method"] == "POST"
     assert captured_request["url_path"] == "/instance/create"
     assert '"instanceName":"ykmedia"' in str(captured_request["json"])
+    assert '"integration":"WHATSAPP-BAILEYS"' in str(captured_request["json"])
     assert result == {"instance": {"instanceName": "ykmedia"}}
 
 
@@ -288,6 +306,8 @@ def test_set_webhook_uses_official_endpoint() -> None:
 
     assert captured_request["method"] == "POST"
     assert captured_request["url_path"] == "/webhook/set/ykmedia"
+    assert '"webhook":{' in str(captured_request["json"])
+    assert '"byEvents":false' in str(captured_request["json"])
     assert '"base64":false' in str(captured_request["json"])
     assert '"x-webhook-secret":"secret"' in str(captured_request["json"])
     assert result == {"webhook": {"enabled": True}}

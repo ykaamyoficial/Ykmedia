@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -6,6 +7,7 @@ import re
 from typing import Any, Protocol
 from uuid import uuid4
 
+from app.core.config import settings
 from app.models.download import DownloadedMedia
 from app.models.interactive import InteractivePrompt
 from app.models.persistence import (
@@ -53,6 +55,14 @@ class MediaHistoryRecorder(Protocol):
         pass
 
 
+@dataclass(slots=True)
+class _SenderSlot:
+    """Serializa o processamento dos webhooks de um mesmo remetente."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    waiters: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class ReceiveMediaResult:
     received_message: ReceivedMessage | None
@@ -74,6 +84,7 @@ class ReceiveMediaUseCase:
         conversation_message_repository: ConversationMessageRepository | None = None,
         media_history_recorder: MediaHistoryRecorder | None = None,
         file_storage: FileStorage | None = None,
+        media_grouping_window_seconds: float | None = None,
     ) -> None:
         self._message_pipeline = message_pipeline
         self._media_repository = media_repository
@@ -81,9 +92,39 @@ class ReceiveMediaUseCase:
         self._conversation_message_repository = conversation_message_repository
         self._media_history_recorder = media_history_recorder
         self._file_storage = file_storage
+        self._media_grouping_window_seconds = (
+            settings.MEDIA_GROUPING_WINDOW_SECONDS
+            if media_grouping_window_seconds is None
+            else max(0.0, media_grouping_window_seconds)
+        )
         self._pending_downloads: dict[str, DownloadedMedia] = {}
+        self._sender_slots: dict[str, _SenderSlot] = {}
 
     async def execute(self, payload: dict[str, Any]) -> ReceiveMediaResult:
+        sender_id = self._extract_sender(payload)
+        if not sender_id:
+            return await self._execute(payload)
+
+        slot = self._sender_slots.get(sender_id)
+        if slot is None:
+            slot = _SenderSlot()
+            self._sender_slots[sender_id] = slot
+        slot.waiters += 1
+        await slot.lock.acquire()
+        try:
+            return await self._execute(payload, slot)
+        finally:
+            if slot.lock.locked():
+                slot.lock.release()
+            slot.waiters -= 1
+            if slot.waiters <= 0:
+                self._sender_slots.pop(sender_id, None)
+
+    async def _execute(
+        self,
+        payload: dict[str, Any],
+        slot: "_SenderSlot | None" = None,
+    ) -> ReceiveMediaResult:
         previous_pending_media_ids = self._get_pending_media_ids_from_sender(
             self._extract_sender(payload)
         )
@@ -102,6 +143,19 @@ class ReceiveMediaUseCase:
                 received_message.sender.remote_jid,
                 pending_media_id,
             )
+
+        if self._should_wait_for_media_grouping(
+            received_message=received_message,
+            conversation_result=conversation_result,
+            downloaded_media=pipeline_result.downloaded_media,
+        ):
+            await self._wait_for_media_grouping(slot)
+            refreshed_result = self._message_pipeline.conversation_engine.build_pending_category_response(
+                received_message.sender.remote_jid,
+                current_state=conversation_result.current_state,
+            )
+            if refreshed_result is not None:
+                conversation_result = refreshed_result
 
         if self._is_silent_conversation_result(
             received_message=received_message,
@@ -208,6 +262,35 @@ class ReceiveMediaUseCase:
             ),
             errors=errors,
         )
+
+    def _should_wait_for_media_grouping(
+        self,
+        received_message: ReceivedMessage | None,
+        conversation_result: object,
+        downloaded_media: DownloadedMedia | None,
+    ) -> bool:
+        return (
+            self._media_grouping_window_seconds > 0
+            and received_message is not None
+            and downloaded_media is not None
+            and conversation_result is not None
+            and getattr(conversation_result, "current_state", None)
+            is ConversationState.IDLE
+            and getattr(conversation_result, "next_state", None)
+            is ConversationState.WAITING_CATEGORY_SELECTION
+            and bool(getattr(conversation_result, "suggested_response", ""))
+        )
+
+    async def _wait_for_media_grouping(self, slot: "_SenderSlot | None" = None) -> None:
+        # Libera a serializacao do remetente durante a janela para que as demais
+        # midias enviadas em sequencia sejam absorvidas neste mesmo lote.
+        if slot is not None:
+            slot.lock.release()
+        try:
+            await asyncio.sleep(self._media_grouping_window_seconds)
+        finally:
+            if slot is not None:
+                await slot.lock.acquire()
 
     def _save_pending_media(
         self,
@@ -430,7 +513,7 @@ class ReceiveMediaUseCase:
             "Webhook media recebido: telefone=%s tipo=%s timestamp=%s media_id=%s",
             message.sender.remote_jid,
             message.message_type.value,
-            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             media_id or "-",
         )
 
@@ -444,7 +527,7 @@ class ReceiveMediaUseCase:
                 message_type=message.message_type.value,
                 state=state,
                 media_id=media_id,
-                created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                created_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
                 status=(
                     ConversationMessageStatus.ERROR
                     if errors
@@ -463,7 +546,7 @@ class ReceiveMediaUseCase:
         origin = "YouTube" if message.raw_type == "youtubeMessage" else "WhatsApp"
         self._media_history_recorder.save_media_history(
             history_id=str(uuid4()),
-            date=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            date=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             sender=message.sender.remote_jid,
             origin=origin,
             category=category,
@@ -503,7 +586,7 @@ class ReceiveMediaUseCase:
             sender=message.sender.remote_jid,
             display_name=message.sender.display_name,
             profile_picture_url=message.sender.profile_picture_url,
-            updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            updated_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         )
 
     def _message_content(self, message: ReceivedMessage) -> str:

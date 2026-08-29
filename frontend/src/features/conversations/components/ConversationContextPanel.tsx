@@ -28,7 +28,7 @@ export function ConversationContextPanel({ details, onClose }: ConversationConte
           <YkIcons.PanelRightClose className="h-4 w-4" />
         </YkButton>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="yk-scroll min-h-0 flex-1 overflow-auto p-3">
         <section className="rounded-xl border border-border bg-panel p-3 text-center">
           <div className="flex justify-center">
             <YkAvatar

@@ -104,6 +104,7 @@ def _use_case(tmp_path: Path, youtube: FakeYoutubeDownloader | None = None) -> t
             message_pipeline=pipeline,
             media_repository=media_repository,
             file_storage=file_storage,
+            media_grouping_window_seconds=0,
         ),
         media_repository,
         conversation_engine,
@@ -217,6 +218,47 @@ def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
     assert all(Path(record.relative_path).parts[0] == "Mensagens" for record in records)
 
 
+def test_grouping_window_sends_single_prompt_with_updated_batch_summary(tmp_path: Path) -> None:
+    media_repository = InMemoryMediaRepository()
+    file_storage = FileStorage(root_directory=tmp_path)
+    conversation_engine = ConversationEngine(session_store=MemorySessionStore())
+    pipeline = MessagePipeline(
+        download_manager=FakeDownloadManager(),
+        file_storage=file_storage,
+        conversation_engine=conversation_engine,
+    )
+    use_case = ReceiveMediaUseCase(
+        message_pipeline=pipeline,
+        media_repository=media_repository,
+        file_storage=file_storage,
+        media_grouping_window_seconds=0.05,
+    )
+
+    async def execute_batch() -> list[object]:
+        first_task = asyncio.create_task(
+            use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1"))
+        )
+        await asyncio.sleep(0.01)
+        second_result = await use_case.execute(
+            _payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")
+        )
+        third_result = await use_case.execute(
+            _payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3")
+        )
+        first_result = await first_task
+        return [first_result, second_result, third_result]
+
+    first_result, second_result, third_result = asyncio.run(execute_batch())
+
+    assert first_result.next_message is not None
+    assert "Recebi 3 arquivos" in first_result.next_message
+    assert "- 1 video" in first_result.next_message
+    assert "- 1 audio" in first_result.next_message
+    assert "- 1 documento" in first_result.next_message
+    assert not second_result.next_message
+    assert not third_result.next_message
+
+
 def test_youtube_link_uses_same_flow(tmp_path: Path) -> None:
     youtube = FakeYoutubeDownloader()
     use_case, media_repository, _ = _use_case(tmp_path, youtube=youtube)
@@ -256,7 +298,10 @@ def test_command_response_is_returned_as_next_message(tmp_path: Path) -> None:
         conversation_engine=conversation_engine,
         command_processor=CommandProcessor(conversation_engine),
     )
-    use_case = ReceiveMediaUseCase(message_pipeline=pipeline)
+    use_case = ReceiveMediaUseCase(
+        message_pipeline=pipeline,
+        media_grouping_window_seconds=0,
+    )
 
     result = asyncio.run(use_case.execute(_payload({"conversation": "!versao"})))
 
@@ -281,6 +326,7 @@ def test_records_media_history_after_confirmation(tmp_path: Path) -> None:
         media_repository=media_repository,
         media_history_recorder=storage_service,
         file_storage=file_storage,
+        media_grouping_window_seconds=0,
     )
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
@@ -306,6 +352,7 @@ def test_records_inbound_media_conversation_message(tmp_path: Path) -> None:
     use_case = ReceiveMediaUseCase(
         message_pipeline=pipeline,
         conversation_message_repository=conversation_messages,
+        media_grouping_window_seconds=0,
     )
 
     result = asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
@@ -343,6 +390,7 @@ def test_text_after_one_day_receives_usage_info(tmp_path: Path) -> None:
     use_case = ReceiveMediaUseCase(
         message_pipeline=pipeline,
         conversation_message_repository=conversation_messages,
+        media_grouping_window_seconds=0,
     )
 
     result = asyncio.run(use_case.execute(_payload({"conversation": "Oi"})))
@@ -377,8 +425,75 @@ def test_text_before_one_day_stays_silent(tmp_path: Path) -> None:
     use_case = ReceiveMediaUseCase(
         message_pipeline=pipeline,
         conversation_message_repository=conversation_messages,
+        media_grouping_window_seconds=0,
     )
 
     result = asyncio.run(use_case.execute(_payload({"conversation": "Oi"})))
 
     assert result.next_message is None
+
+
+def test_execute_serializes_concurrent_webhooks_from_same_sender(tmp_path: Path) -> None:
+    use_case, _, _ = _use_case(tmp_path)
+
+    active = 0
+    max_active = 0
+    original = use_case._execute
+
+    async def tracking_execute(payload: dict[str, Any], slot=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.02)
+            return await original(payload, slot)
+        finally:
+            active -= 1
+
+    use_case._execute = tracking_execute  # type: ignore[method-assign]
+
+    async def scenario() -> None:
+        await asyncio.gather(
+            use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")),
+            use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG2")),
+            use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG3")),
+        )
+
+    asyncio.run(scenario())
+
+    assert max_active == 1
+    assert use_case._sender_slots == {}
+
+
+def test_execute_runs_distinct_senders_concurrently(tmp_path: Path) -> None:
+    use_case, _, _ = _use_case(tmp_path)
+
+    active = 0
+    max_active = 0
+    original = use_case._execute
+
+    async def tracking_execute(payload: dict[str, Any], slot=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.02)
+            return await original(payload, slot)
+        finally:
+            active -= 1
+
+    use_case._execute = tracking_execute  # type: ignore[method-assign]
+
+    async def scenario() -> None:
+        await asyncio.gather(
+            use_case.execute(
+                _payload({"conversation": "a"}, remote_jid="551111111111@s.whatsapp.net")
+            ),
+            use_case.execute(
+                _payload({"conversation": "b"}, remote_jid="552222222222@s.whatsapp.net")
+            ),
+        )
+
+    asyncio.run(scenario())
+
+    assert max_active == 2

@@ -1,12 +1,10 @@
 import { useMemo } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 
-import { YkButton } from "@/components/system/YkButton";
 import { YkDataTable } from "@/shared/tables";
-import { YkIcons } from "@/shared/icons";
 import { type FileLibraryItem } from "@/features/files/types";
-import { fileDisplayName, openContainingFolder, openFile } from "@/features/files/utils";
-import { FileKindBadge, FileStatusBadge } from "@/features/files/components/FileKindBadge";
+import { fileDisplayName } from "@/features/files/utils";
+import { MediaActions, MediaName, MediaStatusBadge, MediaTypeIcon } from "@/shared/media";
 
 type FilesTableProps = {
   files: FileLibraryItem[];
@@ -20,15 +18,15 @@ export function FilesTable({ files, loading = false }: FilesTableProps) {
         accessorKey: "final_name",
         header: "Nome",
         cell: ({ row }) => (
-          <span className="block max-w-72 truncate font-medium">
-            {fileDisplayName(row.original)}
-          </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <MediaTypeIcon kind={row.original.kind} size="sm" />
+            <MediaName name={fileDisplayName(row.original)} className="max-w-72" />
+          </div>
         ),
       },
       {
         accessorKey: "kind",
         header: "Tipo",
-        cell: ({ row }) => <FileKindBadge kind={row.original.kind} />,
       },
       {
         accessorKey: "size",
@@ -49,31 +47,17 @@ export function FilesTable({ files, loading = false }: FilesTableProps) {
       {
         accessorKey: "status",
         header: "Status",
-        cell: ({ row }) => <FileStatusBadge status={row.original.status} />,
+        cell: ({ row }) => <MediaStatusBadge status={row.original.status} />,
       },
       {
         id: "actions",
         header: "Acoes",
         cell: ({ row }) => (
-          <div className="flex flex-wrap gap-2">
-            <YkButton
-              variant="secondary"
-              size="sm"
-              disabled={!row.original.exists}
-              onClick={() => openFile(row.original.absolute_path)}
-            >
-              <YkIcons.Play className="h-3.5 w-3.5" aria-hidden="true" />
-              Abrir
-            </YkButton>
-            <YkButton
-              variant="secondary"
-              size="sm"
-              onClick={() => openContainingFolder(row.original.absolute_path)}
-            >
-              <YkIcons.FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
-              Abrir pasta
-            </YkButton>
-          </div>
+          <MediaActions
+            path={row.original.absolute_path}
+            canOpen={row.original.exists}
+            fileName={fileDisplayName(row.original)}
+          />
         ),
       },
     ],

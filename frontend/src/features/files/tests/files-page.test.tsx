@@ -119,7 +119,7 @@ describe("FilesPage", () => {
 
     renderFiles();
 
-    await waitFor(() => expect(screen.getByText("Erro ao carregar")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Sem conexao")).toBeInTheDocument());
   });
 
   it("opens file paths using the local file URL fallback", async () => {
@@ -135,8 +135,8 @@ describe("FilesPage", () => {
 
     renderFiles();
 
-    await waitFor(() => expect(screen.getByText("imagem.jpg")).toBeInTheDocument());
-    fireEvent.click(screen.getAllByRole("button", { name: /abrir$/i })[0]);
+    await waitFor(() => expect(screen.getByText("imagem")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByRole("button", { name: /abrir arquivo/i })[0]);
     expect(open).toHaveBeenCalledWith(
       "file:///C:/media/Louvores/imagem.jpg",
       "_blank",

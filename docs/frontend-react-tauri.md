@@ -1,5 +1,9 @@
 # Frontend React + Tauri
 
+> **Status:** migracao concluida. A interface PySide6 (`app/desktop/`) foi
+> removida; as mencoes a ela neste documento sao historicas e descrevem o
+> comportamento que a interface React/Tauri agora reproduz.
+
 ## Arquitetura
 
 A nova interface desktop fica separada do backend Python:
@@ -1042,7 +1046,7 @@ npm.cmd run dev
 
 ## Tauri
 
-Com Rust/Cargo instalado:
+No desenvolvimento, inicie o backend manualmente antes de abrir o Tauri:
 
 ```powershell
 cd "C:\Users\Industel\Documents\New project\Ykmedia-main\frontend"
@@ -1052,8 +1056,38 @@ npm.cmd run tauri:dev
 Build:
 
 ```powershell
+cd "C:\Users\Industel\Documents\New project\Ykmedia-main"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_backend_sidecar.ps1
+
+cd frontend
 npm.cmd run tauri:build
 ```
+
+O build gera o backend FastAPI como `ykmedia-backend.exe` e o inclui no instalador Tauri.
+Na instalacao, o aplicativo inicia esse backend automaticamente se `http://127.0.0.1:8010/health`
+nao responder. Depois que o backend estiver online, o aplicativo executa automaticamente a preparacao
+existente do sistema em segundo plano: cria configuracoes, verifica o Docker, inicia os containers e
+prepara a Evolution. A interface permanece utilizavel durante essa etapa. Dados do usuario, banco SQLite,
+logs, downloads e configuracoes ficam em:
+
+```text
+%LOCALAPPDATA%\YkMedia
+```
+
+Se ja existir um backend respondendo na porta 8010, ele e reutilizado e nao e encerrado ao fechar a interface.
+
+## Instalador Inno Setup
+
+O instalador unico do Windows inclui a interface Tauri e o backend FastAPI. Para gera-lo:
+
+```powershell
+cd "C:\Users\Industel\Documents\New project\Ykmedia-main"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_inno_installer.ps1
+```
+
+O resultado sera criado em `installer\output`. O Docker Desktop continua sendo preparado pelo
+YkMedia na primeira abertura, pois ele e uma dependencia do Windows que pode solicitar permissao
+administrativa ou reinicializacao.
 
 ## Variaveis De Ambiente
 
@@ -1075,8 +1109,15 @@ FRONTEND_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,tauri://localh
 
 ## Limitacoes
 
-- Configuracoes ainda nao possui funcionalidade no React.
-- O Tauri ainda nao inicia o backend automaticamente.
+- Docker Desktop continua sendo uma dependencia externa para Evolution, PostgreSQL e Redis. A tela
+  "Preparar Sistema" continua responsavel por instalar/iniciar o Docker e subir esses servicos.
 - O PySide6 continua existindo e funcionando em paralelo.
-- O build Tauri depende da instalacao do Rust/Cargo.
+- O build Tauri depende da instalacao do Rust/Cargo e do Python com PyInstaller na maquina de build.
 - O npm reportou vulnerabilidades transitivas; nao foi aplicado `npm audit fix --force` para evitar upgrades quebrando compatibilidade nesta etapa.
+- Downloads, Atualizacoes, Tema, Idioma e Backup em Configuracoes exibem paineis informativos fixos
+  (`SimpleSettingsPanel`), sem controle real ainda; Pastas, WhatsApp, Sistema e Avancado ja sao funcionais.
+- `frontend/src/pages/StartupPage.tsx` (tela de espera de backend) e os componentes de workspace de
+  Conversas em `frontend/src/features/conversations/components/` (`ConversationContextPanel`,
+  `ConversationMessageList`, `ConversationWorkspaceInfoBar`, `ConversationLocalSearchBar`,
+  `MessageContextMenu`) existem, tem testes e sao exportados, mas nao estao conectados as paginas em uso.
+  Nao foram religados nesta etapa para evitar mudanca de comportamento sem autorizacao explicita.

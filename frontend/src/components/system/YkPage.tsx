@@ -13,7 +13,7 @@ export function YkPage({ item, children }: YkPageProps) {
 
   return (
     <main className="min-h-0 flex-1 overflow-hidden bg-background p-5">
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-4">
+      <div className="yk-scroll mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-4 overflow-y-auto">
         {children ?? (
           <YkEmptyState
             icon={Icon}

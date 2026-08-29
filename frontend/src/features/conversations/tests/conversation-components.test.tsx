@@ -97,11 +97,12 @@ describe("conversation components", () => {
       />,
     );
 
-    expect(screen.getByText("louvor.mp3")).toBeInTheDocument();
+    expect(screen.getByText("louvor")).toBeInTheDocument();
+    expect(screen.getByText(".mp3")).toBeInTheDocument();
     expect(screen.getByLabelText("Abrir arquivo louvor.mp3")).toBeInTheDocument();
-    expect(screen.getByLabelText("Abrir pasta de louvor.mp3")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mostrar louvor.mp3 na pasta")).toBeInTheDocument();
     expect(screen.getByText("Abrir arquivo")).toBeInTheDocument();
-    expect(screen.getByText("Abrir pasta")).toBeInTheDocument();
+    expect(screen.getByText("Mostrar na pasta")).toBeInTheDocument();
   });
 
   it("renders message bubble without raw html execution", () => {

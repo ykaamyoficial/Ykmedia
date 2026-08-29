@@ -28,6 +28,9 @@ export function ConversationHeader({
         />
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold text-foreground">{details.profile.display_name}</h2>
+          {details.profile.display_name !== details.profile.phone ? (
+            <p className="truncate text-xs text-secondary">{details.profile.phone}</p>
+          ) : null}
           <p className="mt-1 truncate text-xs text-secondary">
             {formatCount(fileCount)} arquivos
             {lastSync ? ` - Ultima sincronizacao ${formatConversationTimestamp(lastSync)}` : ""}

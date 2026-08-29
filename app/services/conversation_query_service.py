@@ -63,7 +63,7 @@ class ConversationQueryService:
             created_at=self._optional_string(row.get("first_activity")),
             updated_at=self._optional_string(row.get("last_activity")),
             additional_status=self._optional_string(row.get("last_status")),
-            message_count=int(row.get("message_count") or 0),
+            message_count=int(row.get("media_count") or row.get("message_count") or 0),
             unread_count=0,
             is_active=self._is_active(row),
         )

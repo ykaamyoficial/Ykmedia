@@ -1,14 +1,17 @@
 import { type ReactNode } from "react";
 
+import { cn } from "@/components/ui/utils";
+
 type YkTooltipProps = {
   label: string;
   children: ReactNode;
   disabled?: boolean;
+  className?: string;
 };
 
-export function YkTooltip({ label, children, disabled = false }: YkTooltipProps) {
+export function YkTooltip({ label, children, disabled = false, className }: YkTooltipProps) {
   return (
-    <span className="group relative inline-flex">
+    <span className={cn("group relative inline-flex", className)}>
       {children}
       {!disabled && (
         <span

@@ -1,7 +1,7 @@
 {
   "$schema": "../frontend/node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "YkMedia",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "br.com.ykmedia.desktop",
   "build": {
     "beforeDevCommand": "npm.cmd run dev --prefix ../frontend",
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/ykmedia-backend"]
   }
 }

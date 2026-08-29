@@ -1,13 +1,14 @@
-import os
 import secrets
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
 from app.core.config import settings
+from app.services.evolution_client import EvolutionConnectionError, EvolutionHttpError
 from app.services.diagnostic_service import DiagnosticReport, DiagnosticStatus
 from app.services.environment_manager import EnvironmentCheck, EnvironmentStatus
 
@@ -234,16 +235,22 @@ class EvolutionProvisioningManager:
         evolution_client,
         webhook_url: str | None = None,
         webhook_secret: str | None = None,
+        readiness_attempts: int = 10,
+        retry_delay_seconds: float = 2.0,
+        sleep=time.sleep,
     ) -> None:
         self._evolution_client = evolution_client
         self._webhook_url = webhook_url or f"http://host.docker.internal:{settings.BACKEND_PORT}/webhooks/evolution"
         self._webhook_secret = webhook_secret if webhook_secret is not None else settings.WEBHOOK_SECRET
+        self._readiness_attempts = readiness_attempts
+        self._retry_delay_seconds = retry_delay_seconds
+        self._sleep = sleep
 
     def provision(self) -> SetupStepResult:
         import asyncio
 
         try:
-            asyncio.run(self._ensure_instance())
+            asyncio.run(self.ensure_instance())
             asyncio.run(self._evolution_client.set_webhook(self._webhook_url, self._webhook_secret))
         except Exception as exc:
             return SetupStepResult(
@@ -260,11 +267,26 @@ class EvolutionProvisioningManager:
             message="Evolution configurada automaticamente.",
         )
 
-    async def _ensure_instance(self) -> None:
-        try:
-            await self._evolution_client.get_connection_state()
-        except Exception:
-            await self._evolution_client.create_instance()
+    async def ensure_instance(self) -> None:
+        """Ensure the configured instance exists before a QR Code is requested."""
+        for attempt in range(1, self._readiness_attempts + 1):
+            try:
+                await self._evolution_client.get_connection_state()
+                return
+            except EvolutionHttpError as exc:
+                if exc.status_code == 404:
+                    await self._evolution_client.create_instance()
+                    return
+                if not self._can_retry(attempt):
+                    raise
+            except EvolutionConnectionError:
+                if not self._can_retry(attempt):
+                    raise
+
+            self._sleep(self._retry_delay_seconds)
+
+    def _can_retry(self, attempt: int) -> bool:
+        return attempt < self._readiness_attempts
 
 
 class AutomaticSetupService:

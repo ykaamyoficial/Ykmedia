@@ -40,8 +40,8 @@ export function YkDataTable<TData>({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <table className="w-full border-collapse text-sm">
+    <div className="yk-scroll overflow-x-auto rounded-xl border border-border">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead className="bg-muted text-left text-xs uppercase tracking-wide text-secondary">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>

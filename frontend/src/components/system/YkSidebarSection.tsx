@@ -8,7 +8,7 @@ type YkSidebarSectionProps = {
 
 export function YkSidebarSection({ title, compact, children }: YkSidebarSectionProps) {
   return (
-    <section className="space-y-1">
+    <section className="flex flex-col gap-1">
       {!compact && (
         <h2 className="px-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
           {title}

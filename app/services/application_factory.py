@@ -220,6 +220,7 @@ def get_settings_query_service() -> SettingsQueryService:
         configuration_manager=get_configuration_manager(),
         diagnostic_service=get_diagnostic_service(),
         automatic_setup_service=get_automatic_setup_service(),
+        evolution_provisioning_manager=get_evolution_provisioning_manager(),
         evolution_client=get_evolution_client(),
     )
 

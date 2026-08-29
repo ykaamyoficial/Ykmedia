@@ -18,7 +18,7 @@ export function YkSidebarItem({ item, compact }: YkSidebarItemProps) {
         to={item.path}
         className={({ isActive }) =>
           cn(
-            "flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium transition",
+            "flex h-9 w-full items-center gap-2 rounded-lg px-2 text-sm font-medium transition",
             "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
             compact && "justify-center px-0",
             isActive

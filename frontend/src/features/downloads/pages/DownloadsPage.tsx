@@ -4,8 +4,8 @@ import { YkButton } from "@/components/system/YkButton";
 import { YkEmptyState } from "@/components/system/YkEmptyState";
 import { YkPage } from "@/components/system/YkPage";
 import { navigationItems } from "@/routes/navigation";
-import { YkErrorState } from "@/shared/components";
-import { friendlyErrorMessage } from "@/shared/errors";
+import { YkErrorState, YkOfflineState } from "@/shared/components";
+import { friendlyErrorMessage, isOfflineError } from "@/shared/errors";
 import { YkIcons } from "@/shared/icons";
 import { toast } from "@/shared/toast";
 import {
@@ -61,7 +61,7 @@ export function DownloadsPage() {
           <h1 className="text-2xl font-semibold text-foreground">Downloads</h1>
           <p className="text-sm text-secondary">Acompanhamento de downloads.</p>
         </div>
-        <YkErrorState />
+        {isOfflineError(jobsQuery.error) ? <YkOfflineState /> : <YkErrorState />}
         <YkButton variant="secondary" className="w-fit" onClick={refreshDownloads}>
           <YkIcons.RefreshCcw className="h-4 w-4" aria-hidden="true" />
           Tentar novamente

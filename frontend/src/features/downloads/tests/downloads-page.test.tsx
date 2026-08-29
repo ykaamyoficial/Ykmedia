@@ -118,7 +118,7 @@ describe("DownloadsPage", () => {
 
     renderDownloads();
 
-    await waitFor(() => expect(screen.getByText("Erro ao carregar")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Sem conexao")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /tentar novamente/i }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   });

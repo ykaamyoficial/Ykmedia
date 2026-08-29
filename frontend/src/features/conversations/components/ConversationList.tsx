@@ -58,7 +58,7 @@ export function ConversationList({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="yk-scroll min-h-0 flex-1 overflow-auto p-2">
         {isOffline ? <YkOfflineState /> : null}
         {isError && !isOffline ? <YkErrorState /> : null}
         {isLoading ? (

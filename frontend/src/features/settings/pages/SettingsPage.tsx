@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { YkButton } from "@/components/system/YkButton";
 import { YkPage } from "@/components/system/YkPage";
 import { navigationItems } from "@/routes/navigation";
-import { YkErrorState, YkSkeleton } from "@/shared/components";
+import { YkErrorState, YkOfflineState, YkSkeleton } from "@/shared/components";
+import { isOfflineError } from "@/shared/errors";
 import { YkIcons } from "@/shared/icons";
 import { toast } from "@/shared/toast";
 import {
@@ -216,7 +217,7 @@ export function SettingsPage() {
   if (settingsQuery.isError) {
     return (
       <YkPage item={settingsItem}>
-        <YkErrorState />
+        {isOfflineError(settingsQuery.error) ? <YkOfflineState /> : <YkErrorState />}
         <YkButton variant="secondary" className="w-fit" onClick={() => void settingsQuery.refetch()}>
           <YkIcons.RefreshCcw className="h-4 w-4" aria-hidden="true" />
           Tentar novamente

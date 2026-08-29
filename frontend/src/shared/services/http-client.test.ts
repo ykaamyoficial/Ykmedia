@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { NetworkError, ServerError, UnknownError } from "@/shared/errors/app-error";
-import { HttpClient } from "@/shared/services/http-client";
+import { HttpClient, setApiAuthToken } from "@/shared/services/http-client";
 
 function response(body: unknown, ok = true, status = 200): Response {
   return {
@@ -47,6 +47,33 @@ describe("HttpClient", () => {
     });
 
     await expect(client.getJson("/health")).rejects.toBeInstanceOf(UnknownError);
+  });
+
+  it("sends the configured API auth token", async () => {
+    const fetcher = vi.fn().mockResolvedValue(response({ status: "ok" }));
+    const client = new HttpClient({ baseUrl: "http://api.test", fetcher });
+
+    setApiAuthToken("segredo-local");
+    try {
+      await client.getJson("/health");
+    } finally {
+      setApiAuthToken(null);
+    }
+
+    const [, request] = fetcher.mock.calls[0] as [string, RequestInit];
+    const headers = request.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer segredo-local");
+  });
+
+  it("omits the Authorization header when no token is set", async () => {
+    const fetcher = vi.fn().mockResolvedValue(response({ status: "ok" }));
+    const client = new HttpClient({ baseUrl: "http://api.test", fetcher });
+
+    await client.getJson("/health");
+
+    const [, request] = fetcher.mock.calls[0] as [string, RequestInit];
+    const headers = request.headers as Headers;
+    expect(headers.has("Authorization")).toBe(false);
   });
 
   it("retries retryable failures", async () => {

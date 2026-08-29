@@ -102,7 +102,7 @@ class MessageResponseSender:
                     else None
                 ),
                 media_id=None,
-                created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                created_at=datetime.now(timezone.utc).isoformat(timespec="microseconds"),
                 status=status,
                 error=error,
             )
