@@ -3,5 +3,7 @@ uvicorn[standard]==0.35.0
 pydantic-settings==2.10.1
 httpx==0.28.1
 pytest==8.4.1
-yt-dlp
+# Fixado para builds reproduziveis. Bump periodicamente: o YouTube quebra
+# versoes antigas do yt-dlp.
+yt-dlp==2026.7.4
 pyinstaller==6.21.0
