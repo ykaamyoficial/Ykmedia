@@ -41,11 +41,26 @@ class EvolutionClient:
             timeout_seconds if timeout_seconds is not None else settings.EVOLUTION_TIMEOUT_SECONDS
         )
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
 
     @property
     def headers(self) -> dict[str, str]:
         """Build headers at request time so automatic setup can refresh the API key."""
         return {"apikey": self._api_key if self._api_key is not None else settings.EVOLUTION_API_KEY}
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Reuse a single client (keep-alive / connection pool) for the process."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                transport=self._transport,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     async def health(self) -> dict[str, Any]:
         return await self._request_json("GET", "")
@@ -244,17 +259,13 @@ class EvolutionClient:
         url = self._build_url(path)
 
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout_seconds,
-                transport=self._transport,
-            ) as client:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=self.headers,
-                    json=json,
-                )
-                response.raise_for_status()
+            response = await self._get_client().request(
+                method,
+                url,
+                headers=self.headers,
+                json=json,
+            )
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             raise EvolutionHttpError(

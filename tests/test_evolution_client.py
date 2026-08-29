@@ -79,6 +79,27 @@ def test_client_uses_current_runtime_api_key_when_no_explicit_key_is_supplied(mo
     assert captured_headers["apikey"] == "prepared-key"
 
 
+def test_reuses_a_single_httpx_client_across_requests() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(status_code=200, json={"status": "ok"}, request=request)
+    )
+    client = EvolutionClient(base_url="http://evolution.test", transport=transport)
+
+    async def scenario() -> tuple[object, object]:
+        await client.health()
+        first = client._client
+        await client.health()
+        second = client._client
+        await client.aclose()
+        return first, second
+
+    first, second = asyncio.run(scenario())
+
+    assert first is not None
+    assert first is second
+    assert client._client is None
+
+
 def test_client_uses_configurable_timeout() -> None:
     client = EvolutionClient(
         base_url="http://evolution.test",

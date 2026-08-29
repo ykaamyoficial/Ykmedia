@@ -30,10 +30,10 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    from app.services.application_factory import get_queue_retry_worker
+
     worker = None
     if settings.QUEUE_RETRY_WORKER_ENABLED:
-        from app.services.application_factory import get_queue_retry_worker
-
         worker = get_queue_retry_worker()
         worker.start()
     try:
@@ -41,6 +41,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     finally:
         if worker is not None:
             await worker.stop()
+        await get_evolution_client().aclose()
 
 
 def create_app() -> FastAPI:
