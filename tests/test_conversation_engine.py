@@ -81,10 +81,29 @@ def test_image_starts_conversation_with_single_question() -> None:
     assert result.current_state is ConversationState.IDLE
     assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.is_finished is False
-    assert "resposta automatica da equipe de Sonoplastia" not in result.suggested_response
-    assert "Recebi 1 arquivo" in result.suggested_response
-    assert "Escolha a categoria" in result.suggested_response
+    assert "canal de mídias" not in result.suggested_response
+    assert "Recebi *1 arquivo*" in result.suggested_response
+    assert "Passo 1 de 3" in result.suggested_response
+    assert "Em qual categoria" in result.suggested_response
+    assert "3 passos" in result.suggested_response
+    assert "cancelar" in result.suggested_response
     assert result.interactive_prompt is not None
+
+
+def test_greeting_uses_the_contact_first_name() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+    message = ReceivedMessage(
+        message_id="IMG1",
+        sender=Sender(remote_jid="556200000000@s.whatsapp.net", display_name="Marina Souza"),
+        message_type=MessageType.IMAGE,
+        raw_type="imageMessage",
+    )
+
+    result = engine.handle(message)
+
+    assert "Olá, Marina!" in result.suggested_response
+    session = engine.get_session(message.sender.remote_jid)
+    assert session is not None and session.contact_name == "Marina"
 
 
 def test_valid_link_starts_conversation() -> None:
@@ -93,7 +112,8 @@ def test_valid_link_starts_conversation() -> None:
     result = engine.handle(_message("https://youtu.be/abc", MessageType.LINK, raw_type="youtubeMessage"))
 
     assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
-    assert "Recebi 1 arquivo" in result.suggested_response
+    assert "Recebi *1 arquivo*" in result.suggested_response
+    assert "Passo 1 de 3" in result.suggested_response
 
 
 def test_multiple_files_are_grouped_in_same_session() -> None:
@@ -119,7 +139,8 @@ def test_single_file_asks_if_user_wants_to_rename_after_category() -> None:
     assert result.current_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.next_state is ConversationState.WAITING_FILENAME_DECISION
     assert result.is_finished is False
-    assert "Deseja renomear este arquivo" in result.suggested_response
+    assert "Passo 2 de 3" in result.suggested_response
+    assert "Manter o nome original" in result.suggested_response
     assert session is not None
     assert session.category == "Louvores"
 
@@ -135,7 +156,7 @@ def test_keep_original_name_finishes_single_file_flow() -> None:
     assert result.current_state is ConversationState.WAITING_FILENAME_DECISION
     assert result.next_state is ConversationState.FINISHED
     assert result.is_finished is True
-    assert "organizados com sucesso" in result.suggested_response
+    assert "salvo em *Louvores*" in result.suggested_response
     assert session is not None
 
 
@@ -148,7 +169,7 @@ def test_invalid_category_keeps_state() -> None:
     assert result.current_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.is_finished is False
-    assert "Opcao invalida" in result.suggested_response
+    assert "Não encontrei essa opção" in result.suggested_response
 
 
 def test_timeout_cancels_session() -> None:
@@ -162,7 +183,7 @@ def test_timeout_cancels_session() -> None:
 
     assert result.next_state is ConversationState.IDLE
     assert result.is_finished is True
-    assert "Nao recebemos sua resposta" in result.suggested_response
+    assert "expirou por inatividade" in result.suggested_response
     assert engine.get_session("556299999999@s.whatsapp.net") is None
 
 

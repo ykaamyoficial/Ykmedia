@@ -20,7 +20,10 @@ class Settings(BaseSettings):
 
     FILE_STORAGE_ROOT: str = "media"
     CONVERSATION_SESSION_TTL_SECONDS: float = 3600.0
-    MEDIA_GROUPING_WINDOW_SECONDS: float = 2.0
+    # Tempo sem resposta ate a conversa expirar (o cliente e avisado antes).
+    CONVERSATION_FLOW_TIMEOUT_SECONDS: float = 1800.0
+    # Janela para agrupar varios arquivos enviados em sequencia num unico lote.
+    MEDIA_GROUPING_WINDOW_SECONDS: float = 8.0
     YOUTUBE_DOWNLOAD_TEMP_ROOT: str = "downloads/youtube"
     FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"

@@ -312,7 +312,7 @@ def test_command_message_does_not_enter_conversation_engine() -> None:
     result = asyncio.run(pipeline.process_event(_payload({"conversation": "!ajuda"})))
 
     assert result.command_result is not None
-    assert "!status" in result.command_result.response
+    assert "status" in result.command_result.response
     assert result.conversation_result is None
     assert conversation_engine.calls == 0
 

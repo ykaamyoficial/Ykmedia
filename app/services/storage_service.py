@@ -44,7 +44,7 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    greeting_sent, received_types
+                    contact_name, greeting_sent, received_types
                 FROM conversation_sessions
                 WHERE sender_id = ?
                 """,
@@ -69,6 +69,7 @@ class StorageService:
         last_interaction_at: float | None = None,
         origin: str | None = None,
         contact_id: str | None = None,
+        contact_name: str | None = None,
         greeting_sent: bool = False,
         received_types: list[str] | tuple[str, ...] | None = None,
     ) -> None:
@@ -79,9 +80,9 @@ class StorageService:
                     sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    greeting_sent, received_types
+                    contact_name, greeting_sent, received_types
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sender_id) DO UPDATE SET
                     state = excluded.state,
                     category = excluded.category,
@@ -96,6 +97,7 @@ class StorageService:
                     last_interaction_at = excluded.last_interaction_at,
                     origin = excluded.origin,
                     contact_id = excluded.contact_id,
+                    contact_name = excluded.contact_name,
                     greeting_sent = excluded.greeting_sent,
                     received_types = excluded.received_types
                 """,
@@ -114,6 +116,7 @@ class StorageService:
                     last_interaction_at,
                     origin,
                     contact_id,
+                    contact_name,
                     1 if greeting_sent else 0,
                     json.dumps(list(received_types or ())),
                 ),
@@ -133,7 +136,7 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    greeting_sent, received_types
+                    contact_name, greeting_sent, received_types
                 FROM conversation_sessions
                 """
             ).fetchall()
@@ -841,6 +844,7 @@ class StorageService:
                     state TEXT NOT NULL,
                     category TEXT,
                     filename TEXT,
+                    contact_name TEXT,
                     pending_media_id TEXT,
                     allowed_option_ids TEXT NOT NULL DEFAULT '[]',
                     processed_interaction_ids TEXT NOT NULL DEFAULT '[]',
@@ -946,6 +950,12 @@ class StorageService:
                 connection=connection,
                 table_name="processing_jobs",
                 column_name="next_attempt_at",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection=connection,
+                table_name="conversation_sessions",
+                column_name="contact_name",
                 definition="TEXT",
             )
             self._ensure_column(

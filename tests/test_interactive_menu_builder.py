@@ -10,7 +10,7 @@ def test_builds_button_sized_menu_with_three_options() -> None:
 
     assert len(prompt.options) == 3
     assert [option.id for option in prompt.options] == ["category:1", "category:2", "category:3"]
-    assert prompt.button_text == "Categorias"
+    assert prompt.button_text == "Ver categorias"
 
 
 def test_builds_list_sized_menu_with_four_or_more_options() -> None:

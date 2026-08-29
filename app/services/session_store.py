@@ -144,6 +144,7 @@ class SQLiteSessionStore:
                 last_interaction_at=session.last_interaction_at,
                 origin=session.origin,
                 contact_id=session.contact_id,
+                contact_name=session.contact_name,
                 greeting_sent=session.greeting_sent,
                 received_types=session.received_types,
             )
@@ -194,6 +195,7 @@ class SQLiteSessionStore:
             ),
             origin=str(row["origin"]) if row.get("origin") is not None else None,
             contact_id=str(row["contact_id"]) if row.get("contact_id") is not None else None,
+            contact_name=str(row["contact_name"]) if row.get("contact_name") is not None else None,
             greeting_sent=bool(row.get("greeting_sent")),
             received_types=tuple(self._decode_json_list(row.get("received_types"))),
         )

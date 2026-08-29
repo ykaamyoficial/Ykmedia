@@ -182,7 +182,7 @@ def test_sends_selection_list_when_prompt_has_up_to_three_options() -> None:
             "list",
             "556299999999@s.whatsapp.net",
             "Escolha uma opcao.",
-            "Opcoes",
+            "Ver opções",
             ("filename:keep_original", "filename:custom"),
             "YkMedia",
         ),

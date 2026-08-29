@@ -152,7 +152,7 @@ def test_image_starts_session_without_saving_file(tmp_path: Path) -> None:
     assert result.conversation_state is ConversationState.WAITING_CATEGORY_SELECTION
     assert result.stored_file is None
     assert result.next_message is not None
-    assert "Escolha a categoria" in result.next_message
+    assert "Em qual categoria" in result.next_message
     assert media_repository.list() == []
     assert list(tmp_path.rglob("*")) == []
     session = engine.get_session("556299999999@s.whatsapp.net")
@@ -168,7 +168,7 @@ def test_single_file_category_asks_for_rename_before_saving(tmp_path: Path) -> N
 
     assert result.conversation_state is ConversationState.WAITING_FILENAME_DECISION
     assert result.stored_file is None
-    assert "Deseja renomear este arquivo" in (result.next_message or "")
+    assert "Passo 2 de 3" in (result.next_message or "")
     assert media_repository.list() == []
     assert engine.get_session("556299999999@s.whatsapp.net") is not None
 
@@ -252,10 +252,10 @@ def test_grouping_window_sends_single_prompt_with_updated_batch_summary(tmp_path
     first_result, second_result, third_result = asyncio.run(execute_batch())
 
     assert first_result.next_message is not None
-    assert "Recebi 3 arquivos" in first_result.next_message
-    assert "- 1 video" in first_result.next_message
-    assert "- 1 audio" in first_result.next_message
-    assert "- 1 documento" in first_result.next_message
+    assert "Recebi *3 arquivos*" in first_result.next_message
+    assert "1 vídeo" in first_result.next_message
+    assert "1 áudio" in first_result.next_message
+    assert "1 documento" in first_result.next_message
     assert not second_result.next_message
     assert not third_result.next_message
 
@@ -285,7 +285,7 @@ def test_timeout_cancels_without_saving(tmp_path: Path) -> None:
     result = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
 
     assert result.next_message is not None
-    assert "Nao recebemos sua resposta" in result.next_message
+    assert "expirou por inatividade" in result.next_message
     assert result.stored_file is None
     assert media_repository.list() == []
     assert not any(tmp_path.rglob("*"))
@@ -397,7 +397,7 @@ def test_text_after_one_day_receives_usage_info(tmp_path: Path) -> None:
     result = asyncio.run(use_case.execute(_payload({"conversation": "Oi"})))
 
     assert result.next_message is not None
-    assert "resposta automatica da equipe de Sonoplastia" in result.next_message
+    assert "canal de mídias da equipe de Sonoplastia" in result.next_message
 
 
 def test_text_before_one_day_stays_silent(tmp_path: Path) -> None:

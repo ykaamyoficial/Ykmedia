@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 import logging
 import time
 from typing import TYPE_CHECKING
 
+from app.core.config import settings
 from app.models.interactive import IncomingInteraction, InteractivePrompt
 from app.models.message import MessageType, ReceivedMessage
 from app.services.category_service import CategoryService
@@ -14,7 +15,18 @@ if TYPE_CHECKING:
     from app.services.session_store import SessionStore
 
 KEEP_ORIGINAL_FILENAME = "__KEEP_ORIGINAL__"
-SESSION_TIMEOUT_SECONDS = 600.0
+
+
+def _session_timeout_seconds() -> float:
+    return settings.CONVERSATION_FLOW_TIMEOUT_SECONDS
+
+
+def _first_name(display_name: str | None) -> str | None:
+    if not display_name:
+        return None
+    first = display_name.strip().split()
+    return first[0] if first else None
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +68,7 @@ class ConversationSession:
     last_interaction_at: float | None = None
     origin: str | None = None
     contact_id: str | None = None
+    contact_name: str | None = None
     greeting_sent: bool = False
     received_types: tuple[str, ...] = ()
 
@@ -159,13 +172,7 @@ class ConversationEngine:
         prompt = self._menu_builder.build_category_menu(self._category_service)
         self._set_allowed_options(session, prompt)
         self._session_store.update(remote_jid, session)
-        return ConversationResult(
-            current_state=current_state,
-            next_state=session.state,
-            suggested_response=self._category_question(session, prompt),
-            is_finished=False,
-            interactive_prompt=prompt,
-        )
+        return self._category_prompt_result(current_state, session, prompt)
 
     def _get_session(self, message: ReceivedMessage) -> ConversationSession:
         sender_id = message.sender.remote_jid
@@ -185,21 +192,16 @@ class ConversationEngine:
         now = self._now()
         session.created_at = now
         session.last_interaction_at = now
-        session.expires_at = now + SESSION_TIMEOUT_SECONDS
+        session.expires_at = now + _session_timeout_seconds()
         session.contact_id = sender_id
+        session.contact_name = _first_name(message.sender.display_name)
         session.origin = "YouTube" if message.raw_type == "youtubeMessage" else "WhatsApp"
         session.greeting_sent = True
         self._append_type(session, message)
         prompt = self._menu_builder.build_category_menu(self._category_service)
         self._set_allowed_options(session, prompt)
         self._session_store.update(sender_id, session)
-        return ConversationResult(
-            current_state=current_state,
-            next_state=session.state,
-            suggested_response=self._category_question(session, prompt),
-            is_finished=False,
-            interactive_prompt=prompt,
-        )
+        return self._category_prompt_result(current_state, session, prompt, greet=True)
 
     def _append_media(
         self,
@@ -210,7 +212,7 @@ class ConversationEngine:
     ) -> ConversationResult:
         self._append_type(session, message)
         session.last_interaction_at = self._now()
-        session.expires_at = self._now() + SESSION_TIMEOUT_SECONDS
+        session.expires_at = self._now() + _session_timeout_seconds()
         self._session_store.update(sender_id, session)
         logger.info(
             "Midia adicionada a sessao: telefone=%s quantidade=%s",
@@ -251,12 +253,8 @@ class ConversationEngine:
             prompt = self._menu_builder.build_category_menu(self._category_service)
             self._set_allowed_options(session, prompt)
             self._session_store.update(sender_id, session)
-            return ConversationResult(
-                current_state=current_state,
-                next_state=current_state,
-                suggested_response=WhatsAppMessageCatalog.invalid_category(prompt),
-                is_finished=False,
-                interactive_prompt=prompt,
+            return self._category_prompt_result(
+                current_state, session, prompt, invalid=True
             )
 
         session.category = category
@@ -280,7 +278,7 @@ class ConversationEngine:
         return ConversationResult(
             current_state=current_state,
             next_state=session.state,
-            suggested_response=WhatsAppMessageCatalog.media_finished(),
+            suggested_response=self._finished_message(session),
             is_finished=True,
         )
 
@@ -359,7 +357,7 @@ class ConversationEngine:
         return ConversationResult(
             current_state=current_state,
             next_state=session.state,
-            suggested_response=WhatsAppMessageCatalog.media_finished(),
+            suggested_response=self._finished_message(session),
             is_finished=True,
         )
 
@@ -417,15 +415,36 @@ class ConversationEngine:
             type_counts=counts,
         )
 
-    def _category_question(
+    def _category_prompt_result(
         self,
+        current_state: ConversationState,
         session: ConversationSession,
         prompt: InteractivePrompt,
-    ) -> str:
+        *,
+        greet: bool = False,
+        invalid: bool = False,
+    ) -> ConversationResult:
         menu_text = WhatsAppMessageCatalog.menu_text(prompt)
-        return WhatsAppMessageCatalog.media_session_started(
+        body = WhatsAppMessageCatalog.category_step(
             summary=self._session_summary(session),
-            menu_text=f"{menu_text}\n\nResponda apenas com o numero correspondente.",
+            menu_text=menu_text,
+            contact_name=session.contact_name if greet else None,
+            invalid=invalid,
+        )
+        rich_prompt = replace(prompt, text=body)
+        return ConversationResult(
+            current_state=current_state,
+            next_state=session.state,
+            suggested_response=body,
+            is_finished=False,
+            interactive_prompt=rich_prompt,
+        )
+
+    def _finished_message(self, session: ConversationSession) -> str:
+        return WhatsAppMessageCatalog.media_finished(
+            contact_name=session.contact_name,
+            category=session.category,
+            count=self._pending_media_count(session),
         )
 
     def _pending_media_count(self, session: ConversationSession) -> int:
