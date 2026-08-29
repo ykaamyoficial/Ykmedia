@@ -65,6 +65,18 @@ class InteractiveMenuBuilder:
             footer=WhatsAppMessageCatalog.FOOTER,
         )
 
+    def build_collecting_menu(self) -> InteractivePrompt:
+        return InteractivePrompt(
+            text=WhatsAppMessageCatalog.collect_done_title(),
+            options=[
+                InteractiveOption(
+                    id="collect:done",
+                    title=WhatsAppMessageCatalog.collect_done_title(),
+                ),
+            ],
+            footer=WhatsAppMessageCatalog.FOOTER,
+        )
+
     def build_confirmation_menu(self) -> InteractivePrompt:
         return InteractivePrompt(
             text=WhatsAppMessageCatalog.invalid_confirmation(),

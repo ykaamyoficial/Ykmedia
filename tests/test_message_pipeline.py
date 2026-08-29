@@ -363,6 +363,7 @@ def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
     )
 
     asyncio.run(pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}})))
+    asyncio.run(pipeline.process_event(_payload({"conversation": "concluir"})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "confirmar"})))
@@ -373,7 +374,7 @@ def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
     assert result.downloaded_media == downloaded_media
     assert result.conversation_result is not None
     assert result.conversation_result.current_state is ConversationState.IDLE
-    assert result.conversation_result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.conversation_result.next_state is ConversationState.WAITING_MEDIA
     assert youtube_downloader.calls == 1
 
 

@@ -364,12 +364,12 @@ def test_conversation_engine_persists_state_changes_with_sqlite_store(tmp_path: 
 
     result = engine.handle(message)
 
-    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_MEDIA
     persisted_session = SQLiteSessionStore(
         storage_service=StorageService(database_path=database_path)
     ).get("sender-1")
     assert persisted_session is not None
-    assert persisted_session.state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert persisted_session.state is ConversationState.WAITING_MEDIA
 
 
 def test_removes_expired_persisted_conversation_sessions(tmp_path: Path) -> None:

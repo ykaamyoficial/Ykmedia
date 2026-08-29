@@ -21,6 +21,17 @@ def _message(
     )
 
 
+def _start_media_flow(
+    engine: ConversationEngine,
+    message_type: MessageType = MessageType.IMAGE,
+    raw_type: str = "imageMessage",
+):
+    """Envia uma mídia e conclui a coleta, deixando a sessão em AGUARDANDO_CATEGORIA."""
+    start = engine.handle(_message(message_type=message_type, raw_type=raw_type))
+    engine.handle(_message("concluir"))
+    return start
+
+
 def _interaction_message(option_id: str, title: str = "Opcao") -> ReceivedMessage:
     return ReceivedMessage(
         message_id=f"MSG-{option_id}",
@@ -79,15 +90,16 @@ def test_image_starts_conversation_with_single_question() -> None:
     result = engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_MEDIA
     assert result.is_finished is False
-    assert "canal de mídias" not in result.suggested_response
     assert "Recebi *1 arquivo*" in result.suggested_response
-    assert "Passo 1 de 3" in result.suggested_response
-    assert "Em qual categoria" in result.suggested_response
-    assert "3 passos" in result.suggested_response
+    assert "Concluir envio" in result.suggested_response
     assert "cancelar" in result.suggested_response
     assert result.interactive_prompt is not None
+
+    after_done = engine.handle(_message("concluir"))
+    assert after_done.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert "Passo 1 de 3" in after_done.suggested_response
 
 
 def test_greeting_uses_the_contact_first_name() -> None:
@@ -111,9 +123,11 @@ def test_valid_link_starts_conversation() -> None:
 
     result = engine.handle(_message("https://youtu.be/abc", MessageType.LINK, raw_type="youtubeMessage"))
 
-    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_MEDIA
     assert "Recebi *1 arquivo*" in result.suggested_response
-    assert "Passo 1 de 3" in result.suggested_response
+    after_done = engine.handle(_message("concluir"))
+    assert after_done.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert "Passo 1 de 3" in after_done.suggested_response
 
 
 def test_multiple_files_are_grouped_in_same_session() -> None:
@@ -132,7 +146,7 @@ def test_multiple_files_are_grouped_in_same_session() -> None:
 def test_single_file_asks_if_user_wants_to_rename_after_category() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     result = engine.handle(_message("1"))
     session = engine.get_session("556299999999@s.whatsapp.net")
 
@@ -148,7 +162,7 @@ def test_single_file_asks_if_user_wants_to_rename_after_category() -> None:
 def test_keep_original_name_goes_to_confirmation_then_finishes() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     engine.handle(_message("1"))
     confirmation = engine.handle(_message("1"))
     result = engine.handle(_message("confirmar"))
@@ -162,9 +176,25 @@ def test_keep_original_name_goes_to_confirmation_then_finishes() -> None:
     assert "salvo em *Louvores*" in result.suggested_response
 
 
+def test_collecting_state_absorbs_media_until_concluir() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    second = engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
+    nudge = engine.handle(_message("qualquer coisa"))
+    done = engine.handle(_message("concluir"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert second.suggested_response == ""
+    assert second.next_state is ConversationState.WAITING_MEDIA
+    assert "Concluir envio" in nudge.suggested_response
+    assert done.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert session is not None and session.received_types == ("imagem", "audio")
+
+
 def test_confirmation_cancel_resets_session() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     engine.handle(_message("1"))
     engine.handle(_message("1"))
 
@@ -177,7 +207,7 @@ def test_confirmation_cancel_resets_session() -> None:
 
 def test_confirmation_correct_returns_to_category() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     engine.handle(_message("1"))
     engine.handle(_message("1"))
 
@@ -191,7 +221,7 @@ def test_confirmation_correct_returns_to_category() -> None:
 def test_invalid_category_keeps_state() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     result = engine.handle(_message("9"))
 
     assert result.current_state is ConversationState.WAITING_CATEGORY_SELECTION
@@ -218,14 +248,14 @@ def test_timeout_cancels_session() -> None:
 def test_restarts_new_session_after_finished_flow() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     engine.handle(_message("1"))
     engine.handle(_message("1"))
     engine.handle(_message("confirmar"))
     result = engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
 
     assert result.current_state is ConversationState.IDLE
-    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.next_state is ConversationState.WAITING_MEDIA
 
 
 def test_uses_dynamic_categories() -> None:
@@ -235,12 +265,13 @@ def test_uses_dynamic_categories() -> None:
         category_service=category_service,
     )
 
-    start_result = engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    category_prompt = engine.handle(_message("concluir"))
     category_result = engine.handle(_message("2"))
     session = engine.get_session("556299999999@s.whatsapp.net")
 
-    assert "1 - Eventos" in start_result.suggested_response
-    assert "2 - Ensaios" in start_result.suggested_response
+    assert "1 - Eventos" in category_prompt.suggested_response
+    assert "2 - Ensaios" in category_prompt.suggested_response
     assert category_result.next_state is ConversationState.WAITING_FILENAME_DECISION
     assert session is not None
     assert session.category == "Ensaios"
@@ -252,7 +283,7 @@ def test_selects_category_from_interactive_button() -> None:
         category_service=CategoryService(categories=["Louvores", "Mensagens"]),
     )
 
-    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    _start_media_flow(engine)
     result = engine.handle(_interaction_message("category:2", "Mensagens"))
     session = engine.get_session("556299999999@s.whatsapp.net")
 
