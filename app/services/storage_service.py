@@ -10,7 +10,14 @@ class StorageService:
         self.database_path = Path(database_path).resolve()
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        self._enable_wal()
         self._initialize_database()
+
+    def _enable_wal(self) -> None:
+        # WAL permite leituras concorrentes com uma escrita e persiste no arquivo
+        # do banco, entao basta configurar uma vez.
+        with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
 
     def list_categories(self) -> list[str]:
         with self._connect() as connection:
@@ -249,7 +256,7 @@ class StorageService:
                 """
                 SELECT id, date, sender, origin, category, final_name, file_path, status
                 FROM media_history
-                ORDER BY date ASC
+                ORDER BY date ASC, rowid ASC
                 """
             ).fetchall()
             return [dict(row) for row in rows]
@@ -273,14 +280,14 @@ class StorageService:
                         SELECT recent.final_name
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_media,
                     (
                         SELECT recent.date
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_activity
                 FROM media_history grouped
@@ -299,7 +306,7 @@ class StorageService:
                 SELECT id, date, sender, origin, category, final_name, file_path, status
                 FROM media_history
                 WHERE sender = ?
-                ORDER BY date DESC, id DESC
+                ORDER BY date DESC, rowid DESC
                 """,
                 (sender,),
             ).fetchall()
@@ -397,7 +404,7 @@ class StorageService:
                     state, media_id, created_at, status, error
                 FROM conversation_messages
                 WHERE sender = ?
-                ORDER BY created_at ASC, id ASC
+                ORDER BY created_at ASC, rowid ASC
                 """,
                 (sender,),
             ).fetchall()
@@ -413,14 +420,14 @@ class StorageService:
                         SELECT coalesce(recent.final_name, recent.file_path)
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_media_content,
                     (
                         SELECT recent.date
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_media_activity,
                     (
@@ -432,28 +439,28 @@ class StorageService:
                         SELECT recent.content
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_content,
                     (
                         SELECT recent.created_at
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_activity,
                     (
                         SELECT recent.state
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_state,
                     (
                         SELECT recent.status
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_status,
                     COUNT(*) AS message_count
@@ -519,14 +526,14 @@ class StorageService:
                         SELECT coalesce(recent.final_name, recent.file_path)
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_media_content,
                     (
                         SELECT recent.date
                         FROM media_history recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.date DESC, recent.id DESC
+                        ORDER BY recent.date DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_media_activity,
                     (
@@ -538,35 +545,35 @@ class StorageService:
                         SELECT recent.content
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_content,
                     (
                         SELECT recent.created_at
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_activity,
                     (
                         SELECT recent.direction
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_direction,
                     (
                         SELECT recent.state
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_state,
                     (
                         SELECT recent.status
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_status,
                     COUNT(*) AS message_count
@@ -600,37 +607,42 @@ class StorageService:
                         SELECT recent.content
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_content,
                     (
                         SELECT recent.created_at
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_activity,
                     (
                         SELECT recent.direction
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_direction,
                     (
                         SELECT recent.status
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at DESC, recent.id DESC
+                        ORDER BY recent.created_at DESC, recent.rowid DESC
                         LIMIT 1
                     ) AS last_status,
                     (
                         SELECT recent.created_at
                         FROM conversation_messages recent
                         WHERE recent.sender = grouped.sender
-                        ORDER BY recent.created_at ASC, recent.id ASC
+                        ORDER BY recent.created_at ASC, recent.rowid ASC
                         LIMIT 1
                     ) AS first_activity,
+                    (
+                        SELECT COUNT(*)
+                        FROM media_history recent
+                        WHERE recent.sender = grouped.sender
+                    ) AS media_count,
                     COUNT(*) AS message_count
                 FROM conversation_messages grouped
                 LEFT JOIN contact_profiles profile ON profile.sender = grouped.sender
@@ -668,7 +680,7 @@ class StorageService:
                     state, media_id, created_at, status, error
                 FROM conversation_messages
                 WHERE sender = ?
-                ORDER BY created_at DESC, id DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
                 (sender, limit, offset),
@@ -827,8 +839,12 @@ class StorageService:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=15.0)
         connection.row_factory = sqlite3.Row
+        # Espera ate 15s por um lock em vez de falhar na hora com "database is
+        # locked"; synchronous=NORMAL e seguro e rapido sob WAL.
+        connection.execute("PRAGMA busy_timeout=15000")
+        connection.execute("PRAGMA synchronous=NORMAL")
         return connection
 
     def _decode_job_row(self, row: sqlite3.Row) -> dict[str, Any]:

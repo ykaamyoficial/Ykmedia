@@ -36,13 +36,16 @@ class EvolutionClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = (base_url or settings.EVOLUTION_BASE_URL).rstrip("/")
-        self.headers: dict[str, str] = {
-            "apikey": api_key if api_key is not None else settings.EVOLUTION_API_KEY
-        }
+        self._api_key = api_key
         self.timeout_seconds = (
             timeout_seconds if timeout_seconds is not None else settings.EVOLUTION_TIMEOUT_SECONDS
         )
         self._transport = transport
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Build headers at request time so automatic setup can refresh the API key."""
+        return {"apikey": self._api_key if self._api_key is not None else settings.EVOLUTION_API_KEY}
 
     async def health(self) -> dict[str, Any]:
         return await self._request_json("GET", "")
@@ -143,7 +146,9 @@ class EvolutionClient:
             json={
                 "instanceName": settings.EVOLUTION_INSTANCE,
                 "qrcode": True,
-                "integration": "BAILEYS",
+                # Evolution API v2.3.7 documents `Integration`, but its running
+                # controller reads this lowercase field when creating an instance.
+                "integration": "WHATSAPP-BAILEYS",
             },
         )
 
@@ -170,11 +175,14 @@ class EvolutionClient:
             "POST",
             f"/webhook/set/{settings.EVOLUTION_INSTANCE}",
             json={
-                "enabled": True,
-                "url": url,
-                "events": events or ["MESSAGES_UPSERT"],
-                "headers": headers,
-                "base64": False,
+                "webhook": {
+                    "enabled": True,
+                    "url": url,
+                    "events": events or ["MESSAGES_UPSERT"],
+                    "headers": headers,
+                    "byEvents": False,
+                    "base64": False,
+                },
             },
         )
 

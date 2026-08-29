@@ -43,9 +43,3 @@ export function uniqueFileOrigins(files: FileLibraryItem[]): string[] {
 export function fileDisplayName(file: FileLibraryItem): string {
   return file.final_name || file.file_path || "Arquivo";
 }
-
-export function containingFolderPath(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, "/");
-  const index = normalized.lastIndexOf("/");
-  return index >= 0 ? filePath.slice(0, index) : filePath;
-}

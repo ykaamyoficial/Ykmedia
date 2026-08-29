@@ -3,7 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { YkDataTable } from "@/shared/tables";
 import { type HistoryItem } from "@/features/history/types";
-import { HistoryStatusBadge } from "@/features/history/components/HistoryStatusBadge";
+import { MediaName, MediaStatusBadge, MediaTypeIcon } from "@/shared/media";
 
 type HistoryTableProps = {
   items: HistoryItem[];
@@ -33,7 +33,12 @@ export function HistoryTable({ items, loading = false }: HistoryTableProps) {
       {
         accessorKey: "final_name",
         header: "Nome final",
-        cell: ({ row }) => <span className="block max-w-80 truncate">{row.original.final_name}</span>,
+        cell: ({ row }) => (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <MediaTypeIcon kind={row.original.kind} size="sm" />
+            <MediaName name={row.original.final_name} className="max-w-80" />
+          </div>
+        ),
       },
       {
         accessorKey: "kind",
@@ -42,7 +47,7 @@ export function HistoryTable({ items, loading = false }: HistoryTableProps) {
       {
         accessorKey: "status",
         header: "Status",
-        cell: ({ row }) => <HistoryStatusBadge status={row.original.status} />,
+        cell: ({ row }) => <MediaStatusBadge status={row.original.status} />,
       },
     ],
     [],

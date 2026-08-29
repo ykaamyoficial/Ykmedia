@@ -18,6 +18,7 @@ class FakeCommandRunner:
         text: bool = True,
         check: bool = True,
         timeout: int = 30,
+        **_: object,
     ) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
         if command[:2] == ["docker", "info"]:

@@ -81,7 +81,7 @@ export function ConversationMessageList({
     <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
-        className="h-full overflow-auto px-4 py-3"
+        className="yk-scroll h-full overflow-auto px-4 py-3"
         onScroll={(event) => {
           const node = event.currentTarget;
           const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 96;

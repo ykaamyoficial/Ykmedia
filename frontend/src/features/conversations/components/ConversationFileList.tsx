@@ -1,7 +1,9 @@
 import { YkButton } from "@/components/system/YkButton";
 import { YkEmptyState } from "@/components/system/YkEmptyState";
+import { ConversationDateDivider } from "@/features/conversations/components/ConversationDateDivider";
 import { ConversationFileCard } from "@/features/conversations/components/ConversationFileCard";
 import { type ConversationFileItem } from "@/features/conversations/utils/conversation-files";
+import { groupFilesByDate } from "@/features/conversations/utils";
 import { YkErrorState, YkSkeleton } from "@/shared/components";
 import { YkIcons } from "@/shared/icons";
 
@@ -26,7 +28,7 @@ export function ConversationFileList({
 }: ConversationFileListProps) {
   if (isError) {
     return (
-      <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
+      <div className="yk-scroll grid min-h-0 flex-1 place-items-center overflow-auto p-4">
         <YkErrorState />
       </div>
     );
@@ -34,7 +36,7 @@ export function ConversationFileList({
 
   if (isLoading) {
     return (
-      <div className="min-h-0 flex-1 overflow-auto p-4">
+      <div className="yk-scroll min-h-0 flex-1 overflow-auto p-4">
         <div className="grid gap-2">
           <YkSkeleton className="h-[74px]" />
           <YkSkeleton className="h-[74px]" />
@@ -47,7 +49,7 @@ export function ConversationFileList({
 
   if (files.length === 0) {
     return (
-      <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
+      <div className="yk-scroll grid min-h-0 flex-1 place-items-center overflow-auto p-4">
         <YkEmptyState
           icon={searchTerm ? YkIcons.SearchX : YkIcons.FolderOpen}
           title={searchTerm ? "Nenhum arquivo encontrado" : "Nenhum arquivo recebido"}
@@ -61,13 +63,20 @@ export function ConversationFileList({
     );
   }
 
+  const groups = groupFilesByDate(files);
+
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-4">
-      <div className="grid gap-2">
-        {files.map((file) => (
-          <ConversationFileCard key={file.id} file={file} />
-        ))}
-      </div>
+    <div className="yk-scroll min-h-0 flex-1 overflow-auto p-4">
+      {groups.map((group) => (
+        <div key={group.label}>
+          <ConversationDateDivider label={group.label} />
+          <div className="grid gap-2">
+            {group.files.map((file) => (
+              <ConversationFileCard key={file.id} file={file} />
+            ))}
+          </div>
+        </div>
+      ))}
       {hasMore ? (
         <div className="mt-3 flex justify-center">
           <YkButton type="button" variant="secondary" size="sm" onClick={onLoadMore} disabled={isFetchingMore}>

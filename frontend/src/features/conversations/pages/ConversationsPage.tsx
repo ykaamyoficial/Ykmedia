@@ -39,7 +39,7 @@ export function ConversationsPage() {
   return (
     <YkPage item={item}>
       <ConversationWorkspaceProvider>
-        <section className="flex h-[calc(100vh-9rem)] min-h-[520px] gap-4 overflow-hidden">
+        <section className="flex h-full min-h-[520px] flex-1 gap-4 overflow-hidden">
           <ConversationList
             conversations={conversationsQuery.data?.items ?? []}
             total={conversationsQuery.data?.total ?? 0}

@@ -26,7 +26,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render() {
     if (this.state.hasError) {
       return (
-        <main className="min-h-0 flex-1 overflow-auto bg-background p-5">
+        <main className="yk-scroll min-h-0 flex-1 overflow-auto bg-background p-5">
           <YkEmptyState
             icon={YkIcons.AlertCircle}
             title="Algo saiu do esperado"

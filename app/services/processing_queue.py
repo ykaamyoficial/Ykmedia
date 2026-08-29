@@ -1,3 +1,4 @@
+import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -8,6 +9,8 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.storage_service import StorageService
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessingJobStatus(StrEnum):
@@ -62,6 +65,7 @@ class ProcessingQueue:
             self._history[job.id] = job
             self._persist(job)
 
+        logger.info("Job criado: id=%s origem=%s remetente=%s", job.id, job.origin.value, job.sender)
         return job
 
     def dequeue(self) -> ProcessingJob | None:
@@ -72,7 +76,9 @@ class ProcessingQueue:
             job = self._pending.popleft()
             job.status = ProcessingJobStatus.PROCESSING
             self._persist(job)
-            return job
+
+        logger.info("Job em processamento: id=%s", job.id)
+        return job
 
     def update(self, job: ProcessingJob) -> None:
         with self._lock:
@@ -153,9 +159,11 @@ class ProcessingWorker:
             job.status = ProcessingJobStatus.ERROR
             job.error = str(exc)
             queue.update(job)
+            logger.error("Job com erro: id=%s motivo=%s", job.id, exc)
             raise
 
         job.result = result
         job.status = ProcessingJobStatus.COMPLETED
         queue.update(job)
+        logger.info("Job finalizado: id=%s", job.id)
         return result

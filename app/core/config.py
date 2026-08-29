@@ -3,10 +3,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "YkMedia"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "0.2.0"
 
     ENVIRONMENT: str = "development"
     WEBHOOK_SECRET: str = ""
+
+    # Token exigido nas rotas de API voltadas ao aplicativo. Quando vazio (modo
+    # desenvolvimento) a verificacao e desativada; o executavel empacotado gera e
+    # persiste um valor automaticamente. Ver app/backend_entry.py.
+    API_AUTH_TOKEN: str = ""
 
     EVOLUTION_BASE_URL: str = "http://localhost:8080"
     EVOLUTION_API_KEY: str = ""
@@ -15,6 +20,7 @@ class Settings(BaseSettings):
 
     FILE_STORAGE_ROOT: str = "media"
     CONVERSATION_SESSION_TTL_SECONDS: float = 3600.0
+    MEDIA_GROUPING_WINDOW_SECONDS: float = 2.0
     YOUTUBE_DOWNLOAD_TEMP_ROOT: str = "downloads/youtube"
     FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"
@@ -28,7 +34,9 @@ class Settings(BaseSettings):
     FRONTEND_CORS_ORIGINS: str = (
         "http://127.0.0.1:5173,"
         "http://localhost:5173,"
-        "tauri://localhost"
+        "tauri://localhost,"
+        "http://tauri.localhost,"
+        "https://tauri.localhost"
     )
 
     model_config = SettingsConfigDict(

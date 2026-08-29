@@ -4,8 +4,8 @@ import { YkButton } from "@/components/system/YkButton";
 import { YkEmptyState } from "@/components/system/YkEmptyState";
 import { YkPage } from "@/components/system/YkPage";
 import { navigationItems } from "@/routes/navigation";
-import { YkErrorState } from "@/shared/components";
-import { friendlyErrorMessage } from "@/shared/errors";
+import { YkErrorState, YkOfflineState } from "@/shared/components";
+import { friendlyErrorMessage, isOfflineError } from "@/shared/errors";
 import { YkIcons } from "@/shared/icons";
 import { toast } from "@/shared/toast";
 import { FilesTable, FilesToolbar } from "@/features/files/components";
@@ -47,7 +47,7 @@ export function FilesPage() {
           <h1 className="text-2xl font-semibold text-foreground">Arquivos</h1>
           <p className="text-sm text-secondary">Biblioteca de midias organizadas.</p>
         </div>
-        <YkErrorState />
+        {isOfflineError(filesQuery.error) ? <YkOfflineState /> : <YkErrorState />}
         <YkButton
           variant="secondary"
           className="w-fit"

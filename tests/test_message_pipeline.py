@@ -1,10 +1,9 @@
 import asyncio
 from typing import Any
 
-import pytest
 
 from app.models.download import DownloadedMedia
-from app.models.message import Media, MessageType, ReceivedMessage, Sender
+from app.models.message import MessageType, ReceivedMessage, Sender
 from app.models.storage import StoredFile
 from app.services.command_processor import CommandProcessor
 from app.services.conversation_engine import ConversationEngine, ConversationState

@@ -147,6 +147,26 @@ class ConversationEngine:
     def get_session(self, remote_jid: str) -> ConversationSession | None:
         return self._session_store.get(remote_jid)
 
+    def build_pending_category_response(
+        self,
+        remote_jid: str,
+        current_state: ConversationState = ConversationState.IDLE,
+    ) -> ConversationResult | None:
+        session = self._session_store.get(remote_jid)
+        if session is None or session.state is not ConversationState.WAITING_CATEGORY_SELECTION:
+            return None
+
+        prompt = self._menu_builder.build_category_menu(self._category_service)
+        self._set_allowed_options(session, prompt)
+        self._session_store.update(remote_jid, session)
+        return ConversationResult(
+            current_state=current_state,
+            next_state=session.state,
+            suggested_response=self._category_question(session, prompt),
+            is_finished=False,
+            interactive_prompt=prompt,
+        )
+
     def _get_session(self, message: ReceivedMessage) -> ConversationSession:
         sender_id = message.sender.remote_jid
         session = self._session_store.get(sender_id)
@@ -173,14 +193,10 @@ class ConversationEngine:
         prompt = self._menu_builder.build_category_menu(self._category_service)
         self._set_allowed_options(session, prompt)
         self._session_store.update(sender_id, session)
-        menu_text = WhatsAppMessageCatalog.menu_text(prompt)
         return ConversationResult(
             current_state=current_state,
             next_state=session.state,
-            suggested_response=WhatsAppMessageCatalog.media_session_started(
-                summary=self._session_summary(session),
-                menu_text=f"{menu_text}\n\nResponda apenas com o numero correspondente.",
-            ),
+            suggested_response=self._category_question(session, prompt),
             is_finished=False,
             interactive_prompt=prompt,
         )
@@ -399,6 +415,17 @@ class ConversationEngine:
         return WhatsAppMessageCatalog.media_summary(
             total=max(1, len(session.received_types)),
             type_counts=counts,
+        )
+
+    def _category_question(
+        self,
+        session: ConversationSession,
+        prompt: InteractivePrompt,
+    ) -> str:
+        menu_text = WhatsAppMessageCatalog.menu_text(prompt)
+        return WhatsAppMessageCatalog.media_session_started(
+            summary=self._session_summary(session),
+            menu_text=f"{menu_text}\n\nResponda apenas com o numero correspondente.",
         )
 
     def _pending_media_count(self, session: ConversationSession) -> int:

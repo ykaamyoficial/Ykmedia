@@ -1,5 +1,6 @@
 import { formatConversationDate, formatTime } from "@/shared/utils";
 import { type ConversationMessageItem } from "@/features/conversations/types";
+import { type ConversationFileItem } from "@/features/conversations/utils/conversation-files";
 
 export function formatConversationTimestamp(value?: string | null) {
   if (!value) {
@@ -50,6 +51,20 @@ export function groupMessagesByDate(messages: ConversationMessageItem[]) {
   return Array.from(groups.entries()).map(([label, groupedMessages]) => ({
     label,
     messages: groupedMessages,
+  }));
+}
+
+export function groupFilesByDate(files: ConversationFileItem[]) {
+  const groups = new Map<string, ConversationFileItem[]>();
+  files.forEach((file) => {
+    const label = formatMessageDate(file.createdAt) || "Sem data";
+    const current = groups.get(label) ?? [];
+    current.push(file);
+    groups.set(label, current);
+  });
+  return Array.from(groups.entries()).map(([label, groupedFiles]) => ({
+    label,
+    files: groupedFiles,
   }));
 }
 

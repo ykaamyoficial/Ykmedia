@@ -112,6 +112,6 @@ describe("HistoryPage", () => {
 
     renderHistory();
 
-    await waitFor(() => expect(screen.getByText("Erro ao carregar")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Sem conexao")).toBeInTheDocument());
   });
 });

@@ -12,7 +12,13 @@ from app.models.settings import (
     SetupReportResponse,
     SetupStepResponse,
 )
-from app.services.configuration_manager import AppConfigurationManager, AutomaticSetupService
+from app.services.configuration_manager import (
+    AppConfigurationManager,
+    AutomaticSetupService,
+    EvolutionProvisioningManager,
+    SetupStepStatus,
+)
+from app.services.evolution_client import EvolutionHttpError
 from app.services.diagnostic_service import DiagnosticService
 
 
@@ -22,11 +28,13 @@ class SettingsQueryService:
         configuration_manager: AppConfigurationManager,
         diagnostic_service: DiagnosticService,
         automatic_setup_service: AutomaticSetupService,
+        evolution_provisioning_manager: EvolutionProvisioningManager,
         evolution_client: Any,
     ) -> None:
         self._configuration_manager = configuration_manager
         self._diagnostic_service = diagnostic_service
         self._automatic_setup_service = automatic_setup_service
+        self._evolution_provisioning_manager = evolution_provisioning_manager
         self._evolution_client = evolution_client
 
     def get_settings(self) -> AppSettingsResponse:
@@ -70,6 +78,30 @@ class SettingsQueryService:
     def connect_evolution_session(self) -> EvolutionSessionResponse:
         try:
             payload = asyncio.run(self._evolution_client.connect_instance())
+        except EvolutionHttpError as exc:
+            if exc.status_code != 404:
+                return EvolutionSessionResponse(
+                    instance_name=settings.EVOLUTION_INSTANCE,
+                    state="Erro",
+                    message=str(exc),
+                )
+
+            provisioning = self._evolution_provisioning_manager.provision()
+            if provisioning.status is not SetupStepStatus.OK:
+                return EvolutionSessionResponse(
+                    instance_name=settings.EVOLUTION_INSTANCE,
+                    state="Erro",
+                    message=provisioning.message,
+                )
+
+            try:
+                payload = asyncio.run(self._evolution_client.connect_instance())
+            except Exception as retry_error:
+                return EvolutionSessionResponse(
+                    instance_name=settings.EVOLUTION_INSTANCE,
+                    state="Erro",
+                    message=str(retry_error),
+                )
         except Exception as exc:
             return EvolutionSessionResponse(
                 instance_name=settings.EVOLUTION_INSTANCE,
@@ -142,12 +174,7 @@ class SettingsQueryService:
         return str(value) if value is not None else "Desconhecida"
 
     def _extract_qrcode_base64(self, payload: dict[str, object]) -> str | None:
-        candidates = [
-            payload.get("base64"),
-            payload.get("qrcode"),
-            payload.get("qr"),
-            payload.get("code"),
-        ]
+        candidates: list[object] = [payload.get("base64"), payload.get("qrcode"), payload.get("qr"), payload.get("code")]
         instance = payload.get("instance")
         if isinstance(instance, dict):
             candidates.extend(
@@ -159,6 +186,15 @@ class SettingsQueryService:
                 ],
             )
         for candidate in candidates:
+            if isinstance(candidate, dict):
+                candidates.extend(
+                    [
+                        candidate.get("base64"),
+                        candidate.get("qrcode"),
+                        candidate.get("qr"),
+                        candidate.get("code"),
+                    ]
+                )
             if isinstance(candidate, str) and candidate.strip():
                 return candidate
         return None

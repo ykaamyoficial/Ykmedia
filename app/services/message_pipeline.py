@@ -7,7 +7,7 @@ from app.models.message import MessageType, ReceivedMessage
 from app.models.storage import StoredFile
 from app.repositories.processed_message_repository import ProcessedMessageRepository
 from app.services.command_processor import CommandProcessor, CommandResult
-from app.services.conversation_engine import ConversationResult, ConversationSession
+from app.services.conversation_engine import ConversationResult, ConversationSession, ConversationState
 from app.services.evolution_message_mapper import EvolutionMessageMappingResult, map_evolution_payload
 from app.services.message_catalog import WhatsAppMessageCatalog
 from app.services.message_processor import ProcessingDecision, is_command_message, process_message
@@ -40,6 +40,13 @@ class ConversationService(Protocol):
         pass
 
     def get_session(self, remote_jid: str) -> ConversationSession | None:
+        pass
+
+    def build_pending_category_response(
+        self,
+        remote_jid: str,
+        current_state: ConversationState = ConversationState.IDLE,
+    ) -> ConversationResult | None:
         pass
 
 

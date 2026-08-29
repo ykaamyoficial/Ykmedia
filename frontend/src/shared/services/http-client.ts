@@ -25,6 +25,13 @@ export type HttpRequestOptions = {
 
 const defaultBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8010";
 
+let apiAuthToken: string | null = null;
+
+/** Define o token enviado em `Authorization` nas chamadas ao backend local. */
+export function setApiAuthToken(token: string | null): void {
+  apiAuthToken = token;
+}
+
 function mergeHeaders(defaultHeaders: HeadersInit, requestHeaders?: HeadersInit): Headers {
   const headers = new Headers(defaultHeaders);
   if (requestHeaders) {
@@ -81,6 +88,9 @@ export class HttpClient {
 
     try {
       const headers = mergeHeaders(this.headers, options.headers);
+      if (apiAuthToken && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${apiAuthToken}`);
+      }
       const request = this.applyInterceptors({
         method: options.method ?? "GET",
         headers,

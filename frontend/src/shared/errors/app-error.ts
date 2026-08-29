@@ -62,3 +62,7 @@ export function toAppError(error: unknown): AppError {
 export function friendlyErrorMessage(error: unknown): string {
   return toAppError(error).friendlyMessage;
 }
+
+export function isOfflineError(error: unknown): boolean {
+  return toAppError(error).kind === "network";
+}

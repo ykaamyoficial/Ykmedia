@@ -4,6 +4,7 @@ export {
   formatMessageDate,
   formatMessageTime,
   countMessageMatches,
+  groupFilesByDate,
   groupMessagesByDate,
   highlightText,
   labelForMessageType,
@@ -12,9 +13,5 @@ export {
 export {
   buildConversationFiles,
   fileMatchesSearch,
-  iconForConversationFile,
-  openConversationFile,
-  openConversationFileFolder,
   type ConversationFileItem,
-  type ConversationFileKind,
 } from "./conversation-files";

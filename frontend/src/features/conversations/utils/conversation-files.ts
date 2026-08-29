@@ -1,25 +1,13 @@
-import { YkIcons } from "@/shared/icons";
-import { type LucideIcon } from "@/shared/icons/YkIcons";
+import { mediaKindFromExtension, mediaKindLabel, normalizeMediaKind, type MediaKind } from "@/shared/media";
 import { formatBytes } from "@/shared/utils";
 
 import { type ConversationDetails, type ConversationMessageItem } from "@/features/conversations/types";
-
-export type ConversationFileKind =
-  | "audio"
-  | "video"
-  | "image"
-  | "pdf"
-  | "zip"
-  | "document"
-  | "youtube"
-  | "text"
-  | "file";
 
 export type ConversationFileItem = {
   id: string;
   name: string;
   extension: string;
-  kind: ConversationFileKind;
+  kind: MediaKind;
   typeLabel: string;
   createdAt: string;
   status?: string;
@@ -81,68 +69,16 @@ function extensionFromName(name: string) {
   return match?.[1]?.toLowerCase() ?? "";
 }
 
-function kindFromExtension(extension: string): ConversationFileKind | undefined {
-  if (["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(extension)) {
-    return "image";
-  }
-  if (["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(extension)) {
-    return "audio";
-  }
-  if (["mp4", "mov", "avi", "mkv", "webm"].includes(extension)) {
-    return "video";
-  }
-  if (extension === "pdf") {
-    return "pdf";
-  }
-  if (["zip", "rar", "7z"].includes(extension)) {
-    return "zip";
-  }
-  if (["txt", "md", "rtf"].includes(extension)) {
-    return "text";
-  }
-  if (extension) {
-    return "document";
-  }
-  return undefined;
-}
-
-function kindFromMessage(message: ConversationMessageItem, extension: string): ConversationFileKind {
-  const normalizedType = message.message_type.toLowerCase();
-  const byExtension = kindFromExtension(extension);
+function kindFromMessage(message: ConversationMessageItem, extension: string): MediaKind {
+  const byExtension = mediaKindFromExtension(extension);
   if (byExtension) {
     return byExtension;
   }
-  if (normalizedType.includes("image")) {
-    return "image";
-  }
-  if (normalizedType.includes("audio")) {
-    return "audio";
-  }
-  if (normalizedType.includes("video")) {
-    return "video";
-  }
-  if (normalizedType.includes("youtube")) {
-    return "youtube";
-  }
-  if (normalizedType.includes("document")) {
-    return "document";
-  }
-  return "file";
-}
 
-function labelForKind(kind: ConversationFileKind) {
-  const labels: Record<ConversationFileKind, string> = {
-    audio: "Audio",
-    video: "Video",
-    image: "Imagem",
-    pdf: "PDF",
-    zip: "Arquivo ZIP",
-    document: "Documento",
-    youtube: "YouTube",
-    text: "Texto",
-    file: "Arquivo",
-  };
-  return labels[kind];
+  const normalizedType = message.message_type.toLowerCase();
+  return normalizeMediaKind(
+    ["image", "audio", "video", "youtube", "document"].find((hint) => normalizedType.includes(hint)),
+  );
 }
 
 function hasMedia(message: ConversationMessageItem) {
@@ -193,7 +129,7 @@ export function buildConversationFiles(
         name,
         extension,
         kind,
-        typeLabel: labelForKind(kind),
+        typeLabel: mediaKindLabel(kind),
         createdAt: message.created_at,
         status: message.status,
         category: metadataString(metadata, ["category"]) ?? details?.category ?? null,
@@ -221,58 +157,4 @@ export function fileMatchesSearch(file: ConversationFileItem, searchTerm: string
     file.senderName,
     file.typeLabel,
   ].some((value) => value?.toLowerCase().includes(normalized));
-}
-
-export function iconForConversationFile(kind: ConversationFileKind): LucideIcon {
-  const icons: Record<ConversationFileKind, LucideIcon> = {
-    audio: YkIcons.Music,
-    video: YkIcons.Video,
-    image: YkIcons.Image,
-    pdf: YkIcons.FileText,
-    zip: YkIcons.Archive,
-    document: YkIcons.FileText,
-    youtube: YkIcons.Play,
-    text: YkIcons.FileText,
-    file: YkIcons.File,
-  };
-
-  return icons[kind];
-}
-
-function isTauriRuntime() {
-  return "__TAURI_INTERNALS__" in window;
-}
-
-function normalizedFileUrl(path: string) {
-  return `file:///${path.replace(/\\/g, "/")}`;
-}
-
-export async function openConversationFile(path?: string) {
-  if (!path) {
-    return;
-  }
-
-  if (isTauriRuntime()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_media_file", { path });
-    return;
-  }
-
-  window.open(normalizedFileUrl(path), "_blank", "noopener,noreferrer");
-}
-
-export async function openConversationFileFolder(path?: string) {
-  if (!path) {
-    return;
-  }
-
-  if (isTauriRuntime()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("reveal_media_file", { path });
-    return;
-  }
-
-  const normalized = path.replace(/\\/g, "/");
-  const folder = normalized.includes("/") ? normalized.slice(0, normalized.lastIndexOf("/")) : normalized;
-  window.open(normalizedFileUrl(folder), "_blank", "noopener,noreferrer");
 }

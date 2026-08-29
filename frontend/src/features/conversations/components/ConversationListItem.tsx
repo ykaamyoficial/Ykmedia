@@ -58,6 +58,9 @@ export function ConversationListItem({ item, selected, onSelect }: ConversationL
         <span className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold text-foreground">{item.display_name}</span>
         </span>
+        {item.display_name !== item.phone ? (
+          <span className="block truncate text-[11px] text-secondary">{item.phone}</span>
+        ) : null}
         <span className="mt-0.5 block truncate text-xs text-secondary">
           {lastFileLabel}
         </span>

@@ -269,13 +269,19 @@ class EnvironmentManager:
         check: bool = True,
         timeout: int = 30,
     ) -> subprocess.CompletedProcess[str]:
+        options: dict[str, object] = {
+            "cwd": str(cwd) if cwd is not None else None,
+            "capture_output": True,
+            "text": True,
+            "check": check,
+            "timeout": timeout,
+        }
+        if os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
         return self.command_runner(
             command,
-            cwd=str(cwd) if cwd is not None else None,
-            capture_output=True,
-            text=True,
-            check=check,
-            timeout=timeout,
+            **options,
         )
 
     def _format_command_error(self, error: subprocess.CalledProcessError) -> str:

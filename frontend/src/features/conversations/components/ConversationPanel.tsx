@@ -76,7 +76,7 @@ export function ConversationPanel({
           <ConversationHeader
             details={details}
             isFetching={isRefreshing}
-            fileCount={files.length}
+            fileCount={details.message_count}
             lastSync={lastSync}
           />
         )}
