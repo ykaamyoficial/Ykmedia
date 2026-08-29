@@ -1,9 +1,12 @@
 import sqlite3
 import time
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.models.dashboard import (
@@ -22,6 +25,17 @@ from app.services.processing_queue import ProcessingJobStatus
 from app.services.storage_service import StorageService
 
 _STARTED_AT = time.monotonic()
+
+
+@dataclass(frozen=True, slots=True)
+class _DashboardSnapshot:
+    database_connected: bool
+    storage_ready: bool
+    has_data: bool
+    downloads: "DashboardDownloadsInfo"
+    files: "DashboardFilesInfo"
+    conversations: "DashboardConversationsInfo"
+    history: list["DashboardHistoryItem"]
 
 
 class EvolutionDashboardClient(Protocol):
@@ -44,16 +58,10 @@ class DashboardService:
         self._media_root = Path(media_root or settings.FILE_STORAGE_ROOT)
 
     async def get_overview(self) -> DashboardOverview:
-        jobs = self._storage_service.list_processing_jobs()
-        history = self._storage_service.list_media_history()
-        sessions = self._storage_service.list_sessions()
-        categories = self._storage_service.list_categories()
-        conversation_contacts = self._storage_service.list_conversation_contacts()
-        database_connected = self._database_connected()
+        # SQLite e I/O de disco sao sincronos: rodam num thread para nao
+        # bloquear o event loop (o dashboard e consultado a cada 15s).
+        snapshot = await run_in_threadpool(self._collect_blocking_snapshot)
         evolution, whatsapp = await self._build_external_status()
-        downloads = self._build_downloads(jobs)
-        files = self._build_files(history, categories)
-        conversations = self._build_conversations(sessions, conversation_contacts)
 
         return DashboardOverview(
             generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -61,16 +69,38 @@ class DashboardService:
                 version=settings.APP_VERSION,
                 uptime_seconds=int(time.monotonic() - _STARTED_AT),
                 backend_online=True,
-                database_connected=database_connected,
+                database_connected=snapshot.database_connected,
             ),
             evolution=evolution,
             whatsapp=whatsapp,
-            downloads=downloads,
-            files=files,
-            conversations=conversations,
-            history=self._build_history(history),
-            health=self._build_health(database_connected, evolution, whatsapp),
+            downloads=snapshot.downloads,
+            files=snapshot.files,
+            conversations=snapshot.conversations,
+            history=snapshot.history,
+            health=self._build_health(
+                snapshot.database_connected,
+                snapshot.storage_ready,
+                evolution,
+                whatsapp,
+            ),
+            has_data=snapshot.has_data,
+        )
+
+    def _collect_blocking_snapshot(self) -> _DashboardSnapshot:
+        jobs = self._storage_service.list_processing_jobs()
+        history = self._storage_service.list_media_history()
+        sessions = self._storage_service.list_sessions()
+        categories = self._storage_service.list_categories()
+        conversation_contacts = self._storage_service.list_conversation_contacts()
+
+        return _DashboardSnapshot(
+            database_connected=self._database_connected(),
+            storage_ready=self._media_root.exists() and self._media_root.is_dir(),
             has_data=bool(history or jobs or sessions or categories or conversation_contacts),
+            downloads=self._build_downloads(jobs),
+            files=self._build_files(history, categories),
+            conversations=self._build_conversations(sessions, conversation_contacts),
+            history=self._build_history(history),
         )
 
     def _build_downloads(self, jobs: list[dict[str, Any]]) -> DashboardDownloadsInfo:
@@ -189,10 +219,10 @@ class DashboardService:
     def _build_health(
         self,
         database_connected: bool,
+        storage_ready: bool,
         evolution: DashboardEvolutionInfo,
         whatsapp: DashboardWhatsAppInfo,
     ) -> list[DashboardHealthItem]:
-        storage_ready = self._media_root.exists() and self._media_root.is_dir()
         return [
             DashboardHealthItem(
                 key="backend",
