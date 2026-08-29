@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.services.conversation_engine import ConversationState
-
 
 @dataclass(frozen=True, slots=True)
 class MediaRecord:
@@ -14,13 +12,6 @@ class MediaRecord:
     size_bytes: int
     sha256: str
     absolute_path: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ConversationRecord:
-    sender_id: str
-    state: ConversationState
-    is_active: bool = True
 
 
 class ProcessedMessageStatus(StrEnum):

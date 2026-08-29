@@ -19,8 +19,11 @@ from app.models.persistence import (
 from app.models.message import MessageType, ReceivedMessage
 from app.models.storage import StoredFile
 from app.repositories.conversation_message_repository import ConversationMessageRepository
-from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.media_repository import MediaRepository
+from app.repositories.pending_media_repository import (
+    InMemoryPendingMediaRepository,
+    PendingMediaRepository,
+)
 from app.services.conversation_engine import ConversationState
 from app.services.conversation_engine import KEEP_ORIGINAL_FILENAME
 from app.services.file_storage import FileStorage, FileStorageError
@@ -80,7 +83,7 @@ class ReceiveMediaUseCase:
         self,
         message_pipeline: MessagePipeline,
         media_repository: MediaRepository | None = None,
-        conversation_repository: ConversationRepository | None = None,
+        pending_media_repository: PendingMediaRepository | None = None,
         conversation_message_repository: ConversationMessageRepository | None = None,
         media_history_recorder: MediaHistoryRecorder | None = None,
         file_storage: FileStorage | None = None,
@@ -88,7 +91,7 @@ class ReceiveMediaUseCase:
     ) -> None:
         self._message_pipeline = message_pipeline
         self._media_repository = media_repository
-        self._conversation_repository = conversation_repository
+        self._pending_media = pending_media_repository or InMemoryPendingMediaRepository()
         self._conversation_message_repository = conversation_message_repository
         self._media_history_recorder = media_history_recorder
         self._file_storage = file_storage
@@ -97,7 +100,6 @@ class ReceiveMediaUseCase:
             if media_grouping_window_seconds is None
             else max(0.0, media_grouping_window_seconds)
         )
-        self._pending_downloads: dict[str, DownloadedMedia] = {}
         self._sender_slots: dict[str, _SenderSlot] = {}
 
     async def execute(self, payload: dict[str, Any]) -> ReceiveMediaResult:
@@ -138,7 +140,10 @@ class ReceiveMediaUseCase:
 
         if received_message is not None and pipeline_result.downloaded_media is not None:
             pending_media_id = pipeline_result.downloaded_media.message_id
-            self._pending_downloads[pending_media_id] = pipeline_result.downloaded_media
+            self._pending_media.save(
+                pipeline_result.downloaded_media,
+                received_message.sender.remote_jid,
+            )
             self._message_pipeline.conversation_engine.attach_pending_media(
                 received_message.sender.remote_jid,
                 pending_media_id,
@@ -314,26 +319,6 @@ class ReceiveMediaUseCase:
             )
         )
 
-    def _store_confirmed_media(self, message: ReceivedMessage) -> StoredFile | None:
-        if self._file_storage is None:
-            return None
-
-        pending_media_id = self._get_pending_media_id(message)
-        if pending_media_id is None:
-            return None
-
-        downloaded_media = self._pending_downloads.get(pending_media_id)
-        if downloaded_media is None:
-            return None
-
-        stored_file = self._file_storage.save(downloaded_media)
-        self._save_pending_media(
-            media_id=downloaded_media.message_id,
-            stored_file=stored_file,
-            mimetype=downloaded_media.mimetype,
-        )
-        return stored_file
-
     def _store_pending_batch(self, message: ReceivedMessage) -> StoredFile | None:
         if self._file_storage is None:
             return None
@@ -352,7 +337,7 @@ class ReceiveMediaUseCase:
         last_file: StoredFile | None = None
 
         for index, pending_media_id in enumerate(pending_media_ids, start=1):
-            downloaded_media = self._pending_downloads.get(pending_media_id)
+            downloaded_media = self._pending_media.get(pending_media_id)
             if downloaded_media is None:
                 continue
 
@@ -374,7 +359,7 @@ class ReceiveMediaUseCase:
                 mimetype=downloaded_media.mimetype,
             )
             self._record_media_history(message, moved_file)
-            self._pending_downloads.pop(pending_media_id, None)
+            self._pending_media.delete(pending_media_id)
             last_file = moved_file
 
         self._message_pipeline.conversation_engine.attach_pending_media(
@@ -382,69 +367,6 @@ class ReceiveMediaUseCase:
             None,
         )
         return last_file
-
-    def _move_pending_media(self, message: ReceivedMessage) -> StoredFile | None:
-        if self._media_repository is None or self._file_storage is None:
-            return None
-
-        pending_media_id = self._get_pending_media_id(message)
-        if pending_media_id is None:
-            return None
-
-        media_record = self._media_repository.get_by_id(pending_media_id)
-        if media_record is None or media_record.absolute_path is None:
-            return None
-
-        session = self._message_pipeline.conversation_engine.get_session(message.sender.remote_jid)
-        if session is None or not session.filename or not session.category:
-            return None
-
-        target_name = (
-            media_record.file_name
-            if session.filename == KEEP_ORIGINAL_FILENAME
-            else session.filename
-        )
-
-        stored_file = StoredFile(
-            absolute_path=media_record.absolute_path,
-            relative_path=media_record.relative_path,
-            file_name=media_record.file_name,
-            extension=f".{media_record.file_name.rsplit('.', 1)[1]}"
-            if "." in media_record.file_name
-            else "",
-            size_bytes=media_record.size_bytes,
-            sha256=media_record.sha256,
-        )
-        renamed_file = self._file_storage.move(
-            stored_file=stored_file,
-            destination_folder=session.category,
-            new_file_name=target_name,
-        )
-        self._media_repository.save(
-            MediaRecord(
-                media_id=media_record.media_id,
-                message_id=media_record.message_id,
-                file_name=renamed_file.file_name,
-                relative_path=renamed_file.relative_path,
-                mimetype=media_record.mimetype,
-                size_bytes=renamed_file.size_bytes,
-                sha256=renamed_file.sha256,
-                absolute_path=renamed_file.absolute_path,
-            )
-        )
-        self._pending_downloads.pop(pending_media_id, None)
-        self._message_pipeline.conversation_engine.attach_pending_media(
-            message.sender.remote_jid,
-            None,
-        )
-        return renamed_file
-
-    def _get_pending_media_id(self, message: ReceivedMessage) -> str | None:
-        return self._get_pending_media_id_from_sender(message.sender.remote_jid)
-
-    def _get_pending_media_id_from_sender(self, sender_id: str | None) -> str | None:
-        pending_media_ids = self._get_pending_media_ids_from_sender(sender_id)
-        return pending_media_ids[-1] if pending_media_ids else None
 
     def _get_pending_media_ids_from_sender(self, sender_id: str | None) -> tuple[str, ...]:
         if not sender_id:
@@ -472,14 +394,9 @@ class ReceiveMediaUseCase:
         remote_jid = key.get("remoteJid")
         return str(remote_jid) if remote_jid else None
 
-    def _discard_pending_media(self, message: ReceivedMessage) -> None:
-        pending_media_id = self._get_pending_media_id(message)
-        if pending_media_id is not None:
-            self._pending_downloads.pop(pending_media_id, None)
-
     def _discard_pending_media_ids(self, media_ids: tuple[str, ...]) -> None:
         for media_id in media_ids:
-            self._pending_downloads.pop(media_id, None)
+            self._pending_media.delete(media_id)
 
     def _target_file_name(
         self,

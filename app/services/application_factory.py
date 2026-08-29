@@ -1,9 +1,10 @@
 from functools import lru_cache
+import time
 
 from app.core.config import settings
-from app.repositories.conversation_repository import InMemoryConversationRepository
 from app.repositories.conversation_message_repository import SQLiteConversationMessageRepository
-from app.repositories.media_repository import InMemoryMediaRepository
+from app.repositories.media_repository import SQLiteMediaRepository
+from app.repositories.pending_media_repository import SQLitePendingMediaRepository
 from app.repositories.processed_message_repository import SQLiteProcessedMessageRepository
 from app.services.configuration_manager import (
     AppConfigurationManager,
@@ -123,13 +124,19 @@ def get_history_query_service() -> HistoryQueryService:
 
 
 @lru_cache(maxsize=1)
-def get_media_repository() -> InMemoryMediaRepository:
-    return InMemoryMediaRepository()
+def get_media_repository() -> SQLiteMediaRepository:
+    return SQLiteMediaRepository(storage_service=get_storage_service())
 
 
 @lru_cache(maxsize=1)
-def get_conversation_repository() -> InMemoryConversationRepository:
-    return InMemoryConversationRepository()
+def get_pending_media_repository() -> SQLitePendingMediaRepository:
+    repository = SQLitePendingMediaRepository(
+        storage_service=get_storage_service(),
+        staging_root=settings.FILE_STORAGE_ROOT,
+    )
+    # Descarta bytes orfaos de conversas que ja expiraram sem serem concluidas.
+    repository.purge_older_than(time.time() - settings.CONVERSATION_SESSION_TTL_SECONDS)
+    return repository
 
 
 @lru_cache(maxsize=1)
@@ -244,7 +251,7 @@ def get_receive_media_use_case() -> ReceiveMediaUseCase:
     return ReceiveMediaUseCase(
         message_pipeline=message_pipeline,
         media_repository=get_media_repository(),
-        conversation_repository=get_conversation_repository(),
+        pending_media_repository=get_pending_media_repository(),
         conversation_message_repository=get_conversation_message_repository(),
         media_history_recorder=get_storage_service(),
         file_storage=file_storage,
