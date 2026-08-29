@@ -147,6 +147,7 @@ class SQLiteSessionStore:
                 contact_name=session.contact_name,
                 greeting_sent=session.greeting_sent,
                 expiry_warning_sent=session.expiry_warning_sent,
+                batch_filenames=session.batch_filenames,
                 received_types=session.received_types,
             )
 
@@ -199,6 +200,7 @@ class SQLiteSessionStore:
             contact_name=str(row["contact_name"]) if row.get("contact_name") is not None else None,
             greeting_sent=bool(row.get("greeting_sent")),
             expiry_warning_sent=bool(row.get("expiry_warning_sent")),
+            batch_filenames=tuple(self._decode_json_list(row.get("batch_filenames"))),
             received_types=tuple(self._decode_json_list(row.get("received_types"))),
         )
 

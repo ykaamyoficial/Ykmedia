@@ -192,6 +192,54 @@ def test_collecting_state_absorbs_media_until_concluir() -> None:
     assert session is not None and session.received_types == ("imagem", "audio")
 
 
+def test_batch_offers_auto_number_or_one_by_one() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
+    engine.handle(_message("concluir"))
+    result = engine.handle(_message("1"))
+
+    assert result.next_state is ConversationState.WAITING_FILENAME_DECISION
+    assert "Passo 2 de 3 · Nomes" in result.suggested_response
+    assert result.interactive_prompt is not None
+    assert [option.id for option in result.interactive_prompt.options] == [
+        "filename:auto_number",
+        "filename:one_by_one",
+    ]
+
+
+def test_batch_named_one_by_one_collects_every_name() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
+    engine.handle(_message("concluir"))
+    engine.handle(_message("1"))
+    first_ask = engine.handle(_message("2"))
+    second_ask = engine.handle(_message("Abertura"))
+    confirmation = engine.handle(_message("Louvor"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert "Arquivo 1 de 2" in first_ask.suggested_response
+    assert "Arquivo 2 de 2" in second_ask.suggested_response
+    assert confirmation.next_state is ConversationState.WAITING_CONFIRMATION
+    assert session is not None
+    assert session.batch_filenames == ("Abertura", "Louvor")
+
+
+def test_invalid_filename_is_rejected_without_advancing() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+    _start_media_flow(engine)
+    engine.handle(_message("1"))
+    engine.handle(_message("2"))
+
+    result = engine.handle(_message("pasta/arquivo"))
+
+    assert result.next_state is ConversationState.WAITING_CUSTOM_FILENAME
+    assert "não pode ser usado" in result.suggested_response
+
+
 def test_confirmation_cancel_resets_session() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
     _start_media_flow(engine)
@@ -290,4 +338,8 @@ def test_selects_category_from_interactive_button() -> None:
     assert result.next_state is ConversationState.WAITING_FILENAME_DECISION
     assert session is not None
     assert session.category == "Mensagens"
-    assert result.interactive_prompt is None
+    assert result.interactive_prompt is not None
+    assert [option.id for option in result.interactive_prompt.options] == [
+        "filename:keep_original",
+        "filename:custom",
+    ]

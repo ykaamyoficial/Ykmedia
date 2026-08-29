@@ -50,6 +50,14 @@ class WhatsAppMessageCatalog:
         return "Escolher um novo nome"
 
     @classmethod
+    def auto_number_title(cls) -> str:
+        return "Numerar automaticamente"
+
+    @classmethod
+    def one_by_one_title(cls) -> str:
+        return "Nomear um por um"
+
+    @classmethod
     def next_page_title(cls) -> str:
         return "Ver mais"
 
@@ -139,7 +147,14 @@ class WhatsAppMessageCatalog:
     # ----- passo 2: nome -----
 
     @classmethod
-    def filename_decision_text(cls) -> str:
+    def filename_decision_text(cls, total: int = 1) -> str:
+        if total > 1:
+            return (
+                "*Passo 2 de 3 · Nomes*\n\n"
+                f"São *{total} arquivos*. Como devo nomeá-los?\n"
+                f"1️⃣ {cls.auto_number_title()} (01, 02, 03…)\n"
+                f"2️⃣ {cls.one_by_one_title()}"
+            )
         return (
             "*Passo 2 de 3 · Nome*\n\n"
             f"{cls.filename_prompt()}\n"
@@ -148,7 +163,16 @@ class WhatsAppMessageCatalog:
         )
 
     @classmethod
-    def custom_filename_request(cls) -> str:
+    def custom_filename_request(
+        cls,
+        index: int | None = None,
+        total: int | None = None,
+    ) -> str:
+        if index is not None and total is not None:
+            return (
+                f"*Arquivo {index} de {total}* — que nome devo dar?\n"
+                "_Sem extensão. Ex.: Cartaz Culto Domingo_"
+            )
         return (
             "Digite o nome do arquivo, sem extensão.\n"
             "_Ex.: Cartaz Culto Domingo_"
@@ -170,10 +194,14 @@ class WhatsAppMessageCatalog:
         category: str | None,
         filename: str | None,
         count: int = 1,
+        batch_filenames: tuple[str, ...] = (),
     ) -> str:
         from app.services.conversation_engine import KEEP_ORIGINAL_FILENAME
 
-        if count > 1:
+        if count > 1 and batch_filenames:
+            lista = "\n".join(f"   {index}. {name}" for index, name in enumerate(batch_filenames, 1))
+            arquivos = f"📄 Arquivos ({count}):\n{lista}"
+        elif count > 1:
             arquivos = f"📄 Arquivos: {count} (numerados automaticamente: 01, 02, 03…)"
         elif not filename or filename == KEEP_ORIGINAL_FILENAME:
             arquivos = "📄 Nome: o nome original do arquivo"

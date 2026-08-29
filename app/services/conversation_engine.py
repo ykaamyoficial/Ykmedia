@@ -81,6 +81,8 @@ class ConversationSession:
     greeting_sent: bool = False
     expiry_warning_sent: bool = False
     received_types: tuple[str, ...] = ()
+    #: Nomes escolhidos um a um para um lote; vazio = numeracao automatica.
+    batch_filenames: tuple[str, ...] = ()
 
 
 class ConversationEngine:
@@ -333,20 +335,19 @@ class ConversationEngine:
         session.last_interaction_at = self._now()
         logger.info("Categoria escolhida: telefone=%s categoria=%s", sender_id, category)
 
-        if self._pending_media_count(session) == 1:
-            session.state = ConversationState.WAITING_FILENAME_DECISION
-            self._clear_allowed_options(session)
-            self._session_store.update(sender_id, session)
-            return ConversationResult(
-                current_state=current_state,
-                next_state=session.state,
-                suggested_response=WhatsAppMessageCatalog.filename_decision_text(),
-                is_finished=False,
-            )
-
-        # Lote: sem passo de nome (numeracao automatica) -> vai direto confirmar.
-        session.filename = KEEP_ORIGINAL_FILENAME
-        return self._go_to_confirmation(sender_id, session, current_state)
+        total = self._pending_media_count(session)
+        session.state = ConversationState.WAITING_FILENAME_DECISION
+        session.batch_filenames = ()
+        prompt = self._menu_builder.build_filename_menu(total=total)
+        self._set_allowed_options(session, prompt)
+        self._session_store.update(sender_id, session)
+        return ConversationResult(
+            current_state=current_state,
+            next_state=session.state,
+            suggested_response=WhatsAppMessageCatalog.filename_decision_text(total=total),
+            is_finished=False,
+            interactive_prompt=prompt,
+        )
 
     def _handle_filename_decision(
         self,
@@ -358,22 +359,31 @@ class ConversationEngine:
     ) -> ConversationResult:
         option_id = self._option_id(text=text, interaction=interaction)
         normalized_option_id = option_id.lower()
-        if normalized_option_id == "filename:keep_original" or text == "1":
+        total = self._pending_media_count(session)
+
+        # Opcao 1: manter o nome original (unico) ou numerar automaticamente (lote).
+        if normalized_option_id in {"filename:keep_original", "filename:auto_number"} or text == "1":
             session.filename = KEEP_ORIGINAL_FILENAME
+            session.batch_filenames = ()
             return self._go_to_confirmation(sender_id, session, current_state)
 
-        if normalized_option_id == "filename:custom" or text == "2":
+        # Opcao 2: escolher o nome (unico) ou nomear um a um (lote).
+        if normalized_option_id in {"filename:custom", "filename:one_by_one"} or text == "2":
             session.state = ConversationState.WAITING_CUSTOM_FILENAME
+            session.batch_filenames = ()
             self._clear_allowed_options(session)
             self._session_store.update(sender_id, session)
             return ConversationResult(
                 current_state=current_state,
                 next_state=session.state,
-                suggested_response=WhatsAppMessageCatalog.custom_filename_request(),
+                suggested_response=WhatsAppMessageCatalog.custom_filename_request(
+                    index=1 if total > 1 else None,
+                    total=total if total > 1 else None,
+                ),
                 is_finished=False,
             )
 
-        prompt = self._menu_builder.build_filename_menu()
+        prompt = self._menu_builder.build_filename_menu(total=total)
         self._set_allowed_options(session, prompt)
         self._session_store.update(sender_id, session)
         return ConversationResult(
@@ -400,7 +410,7 @@ class ConversationEngine:
         current_state: ConversationState,
         text: str,
     ) -> ConversationResult:
-        if not text:
+        if not self._is_valid_filename(text):
             return ConversationResult(
                 current_state=current_state,
                 next_state=current_state,
@@ -408,8 +418,32 @@ class ConversationEngine:
                 is_finished=False,
             )
 
-        session.filename = text
+        total = self._pending_media_count(session)
+        if total <= 1:
+            session.filename = text
+            return self._go_to_confirmation(sender_id, session, current_state)
+
+        # Lote nomeado um a um: guarda o nome e pede o proximo, se houver.
+        session.batch_filenames = (*session.batch_filenames, text)
+        collected = len(session.batch_filenames)
+        if collected < total:
+            session.last_interaction_at = self._now()
+            self._session_store.update(sender_id, session)
+            return ConversationResult(
+                current_state=current_state,
+                next_state=session.state,
+                suggested_response=WhatsAppMessageCatalog.custom_filename_request(
+                    index=collected + 1,
+                    total=total,
+                ),
+                is_finished=False,
+            )
+
+        session.filename = session.batch_filenames[-1]
         return self._go_to_confirmation(sender_id, session, current_state)
+
+    def _is_valid_filename(self, text: str) -> bool:
+        return bool(text) and not any(char in text for char in '/\\:*?"<>|')
 
     def _go_to_confirmation(
         self,
@@ -426,6 +460,7 @@ class ConversationEngine:
             category=session.category,
             filename=session.filename,
             count=self._pending_media_count(session),
+            batch_filenames=session.batch_filenames,
         )
         return ConversationResult(
             current_state=current_state,
@@ -453,6 +488,7 @@ class ConversationEngine:
             session.state = ConversationState.WAITING_CATEGORY_SELECTION
             session.category = None
             session.filename = None
+            session.batch_filenames = ()
             prompt = self._menu_builder.build_category_menu(self._category_service)
             self._set_allowed_options(session, prompt)
             self._session_store.update(sender_id, session)
