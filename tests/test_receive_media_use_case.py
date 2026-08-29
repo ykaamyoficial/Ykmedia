@@ -210,14 +210,19 @@ def test_single_file_can_be_renamed_after_category(tmp_path: Path) -> None:
     assert {record.file_name for record in media_repository.list()} == {"Culto Domingo.jpg"}
 
 
-def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
-    use_case, media_repository, _ = _use_case(tmp_path)
-
+def _send_batch(use_case) -> None:
     asyncio.run(use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1")))
     asyncio.run(use_case.execute(_payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")))
     asyncio.run(use_case.execute(_payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3")))
     asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
-    confirm = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
+
+
+def test_multiple_files_are_auto_numbered_in_received_order(tmp_path: Path) -> None:
+    use_case, media_repository, _ = _use_case(tmp_path)
+
+    _send_batch(use_case)
+    confirm = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAMES1")))
     result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     assert confirm.conversation_state is ConversationState.WAITING_CONFIRMATION
@@ -227,6 +232,30 @@ def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
     assert [record.file_name for record in records] == ["001.mp4", "002.mp3", "003.pdf"]
     assert all(Path(record.absolute_path or "").exists() for record in records)
     assert all(Path(record.relative_path).parts[0] == "Mensagens" for record in records)
+
+
+def test_multiple_files_can_be_named_one_by_one(tmp_path: Path) -> None:
+    use_case, media_repository, _ = _use_case(tmp_path)
+
+    _send_batch(use_case)
+    first_ask = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "NAMES1")))
+    second_ask = asyncio.run(use_case.execute(_payload({"conversation": "Abertura"}, "N1")))
+    third_ask = asyncio.run(use_case.execute(_payload({"conversation": "Louvor"}, "N2")))
+    confirm = asyncio.run(use_case.execute(_payload({"conversation": "Encerramento"}, "N3")))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
+
+    assert "Arquivo 1 de 3" in (first_ask.next_message or "")
+    assert "Arquivo 2 de 3" in (second_ask.next_message or "")
+    assert "Arquivo 3 de 3" in (third_ask.next_message or "")
+    assert confirm.conversation_state is ConversationState.WAITING_CONFIRMATION
+    assert "Abertura" in (confirm.next_message or "")
+    assert "Encerramento" in (confirm.next_message or "")
+    assert result.stored_file is not None
+    assert [record.file_name for record in media_repository.list()] == [
+        "Abertura.mp4",
+        "Louvor.mp3",
+        "Encerramento.pdf",
+    ]
 
 
 def test_collecting_state_absorbs_files_and_concluir_shows_combined_summary(tmp_path: Path) -> None:

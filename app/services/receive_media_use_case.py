@@ -348,6 +348,7 @@ class ReceiveMediaUseCase:
                 downloaded_media=downloaded_media,
                 index=index,
                 total=len(pending_media_ids),
+                batch_filenames=session.batch_filenames,
             )
             moved_file = self._file_storage.move(
                 stored_file=stored_file,
@@ -405,8 +406,12 @@ class ReceiveMediaUseCase:
         downloaded_media: DownloadedMedia,
         index: int,
         total: int,
+        batch_filenames: tuple[str, ...] = (),
     ) -> str:
         if total > 1:
+            # Nomes escolhidos um a um vencem a numeracao automatica.
+            if index <= len(batch_filenames):
+                return batch_filenames[index - 1]
             return f"{index:03d}"
         if session_filename and session_filename != KEEP_ORIGINAL_FILENAME:
             return session_filename

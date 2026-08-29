@@ -49,10 +49,20 @@ class InteractiveMenuBuilder:
             button_text=WhatsAppMessageCatalog.category_button_text(),
         )
 
-    def build_filename_menu(self) -> InteractivePrompt:
-        return InteractivePrompt(
-            text=WhatsAppMessageCatalog.filename_prompt(),
-            options=[
+    def build_filename_menu(self, total: int = 1) -> InteractivePrompt:
+        if total > 1:
+            options = [
+                InteractiveOption(
+                    id="filename:auto_number",
+                    title=WhatsAppMessageCatalog.auto_number_title(),
+                ),
+                InteractiveOption(
+                    id="filename:one_by_one",
+                    title=WhatsAppMessageCatalog.one_by_one_title(),
+                ),
+            ]
+        else:
+            options = [
                 InteractiveOption(
                     id="filename:keep_original",
                     title=WhatsAppMessageCatalog.keep_original_title(),
@@ -61,7 +71,11 @@ class InteractiveMenuBuilder:
                     id="filename:custom",
                     title=WhatsAppMessageCatalog.custom_filename_title(),
                 ),
-            ],
+            ]
+
+        return InteractivePrompt(
+            text=WhatsAppMessageCatalog.filename_prompt(),
+            options=options,
             footer=WhatsAppMessageCatalog.FOOTER,
         )
 

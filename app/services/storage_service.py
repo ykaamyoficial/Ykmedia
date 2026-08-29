@@ -44,7 +44,8 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, expiry_warning_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, batch_filenames,
+                    received_types
                 FROM conversation_sessions
                 WHERE sender_id = ?
                 """,
@@ -72,6 +73,7 @@ class StorageService:
         contact_name: str | None = None,
         greeting_sent: bool = False,
         expiry_warning_sent: bool = False,
+        batch_filenames: list[str] | tuple[str, ...] | None = None,
         received_types: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         with self._lock, self._connect() as connection:
@@ -81,9 +83,10 @@ class StorageService:
                     sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, expiry_warning_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, batch_filenames,
+                    received_types
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sender_id) DO UPDATE SET
                     state = excluded.state,
                     category = excluded.category,
@@ -101,6 +104,7 @@ class StorageService:
                     contact_name = excluded.contact_name,
                     greeting_sent = excluded.greeting_sent,
                     expiry_warning_sent = excluded.expiry_warning_sent,
+                    batch_filenames = excluded.batch_filenames,
                     received_types = excluded.received_types
                 """,
                 (
@@ -121,6 +125,7 @@ class StorageService:
                     contact_name,
                     1 if greeting_sent else 0,
                     1 if expiry_warning_sent else 0,
+                    json.dumps(list(batch_filenames or ())),
                     json.dumps(list(received_types or ())),
                 ),
             )
@@ -139,7 +144,8 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, expiry_warning_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, batch_filenames,
+                    received_types
                 FROM conversation_sessions
                 """
             ).fetchall()
@@ -886,6 +892,7 @@ class StorageService:
                     contact_id TEXT,
                     greeting_sent INTEGER NOT NULL DEFAULT 0,
                     expiry_warning_sent INTEGER NOT NULL DEFAULT 0,
+                    batch_filenames TEXT NOT NULL DEFAULT '[]',
                     received_types TEXT NOT NULL DEFAULT '[]',
                     updated_at REAL NOT NULL
                 );
@@ -1054,6 +1061,12 @@ class StorageService:
                 table_name="conversation_sessions",
                 column_name="expiry_warning_sent",
                 definition="INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                connection=connection,
+                table_name="conversation_sessions",
+                column_name="batch_filenames",
+                definition="TEXT NOT NULL DEFAULT '[]'",
             )
             self._ensure_column(
                 connection=connection,
