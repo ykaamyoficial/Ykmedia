@@ -365,6 +365,7 @@ def test_youtube_link_starts_new_flow_after_finished_conversation() -> None:
     asyncio.run(pipeline.process_event(_payload({"audioMessage": {"mimetype": "audio/ogg"}})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
     asyncio.run(pipeline.process_event(_payload({"conversation": "1"})))
+    asyncio.run(pipeline.process_event(_payload({"conversation": "confirmar"})))
     result = asyncio.run(
         pipeline.process_event(_payload({"conversation": "https://youtu.be/abc"}))
     )

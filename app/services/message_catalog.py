@@ -73,6 +73,14 @@ class WhatsAppMessageCatalog:
     def cancel_title(cls) -> str:
         return "Cancelar"
 
+    @classmethod
+    def confirm_title(cls) -> str:
+        return "Confirmar envio"
+
+    @classmethod
+    def correct_title(cls) -> str:
+        return "Corrigir"
+
     # ----- passo 1: categoria -----
 
     @classmethod
@@ -127,6 +135,35 @@ class WhatsAppMessageCatalog:
     @classmethod
     def invalid_filename_decision(cls, prompt: InteractivePrompt) -> str:
         return "Não entendi. Responda com *1* para manter o nome ou *2* para escolher um novo."
+
+    # ----- passo 3: confirmação -----
+
+    @classmethod
+    def confirmation_step(
+        cls,
+        category: str | None,
+        filename: str | None,
+        count: int = 1,
+    ) -> str:
+        from app.services.conversation_engine import KEEP_ORIGINAL_FILENAME
+
+        if count > 1:
+            arquivos = f"📄 Arquivos: {count} (numerados automaticamente: 01, 02, 03…)"
+        elif not filename or filename == KEEP_ORIGINAL_FILENAME:
+            arquivos = "📄 Nome: o nome original do arquivo"
+        else:
+            arquivos = f"📄 Nome: {filename}"
+
+        return (
+            "*Passo 3 de 3 · Confirmação*\n\n"
+            "Revise antes de enviar para a equipe:\n\n"
+            f"📁 Categoria: *{category or '—'}*\n"
+            f"{arquivos}"
+        )
+
+    @classmethod
+    def invalid_confirmation(cls) -> str:
+        return "Não entendi. Toque em *Confirmar envio*, *Corrigir* ou *Cancelar*."
 
     # ----- encerramento -----
 

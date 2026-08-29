@@ -207,21 +207,15 @@ class ReceiveMediaUseCase:
             conversation_result is not None
             and conversation_result.is_finished
             and conversation_result.next_state is ConversationState.IDLE
-            and conversation_result.suggested_response
-            == WhatsAppMessageCatalog.conversation_timeout()
         ):
+            # Timeout ou cancelamento: nada foi confirmado, descarta os bytes.
             self._discard_pending_media_ids(previous_pending_media_ids)
 
         if (
             received_message is not None
             and conversation_result is not None
             and conversation_result.next_state is ConversationState.FINISHED
-            and conversation_result.current_state
-            in {
-                ConversationState.WAITING_CATEGORY_SELECTION,
-                ConversationState.WAITING_FILENAME_DECISION,
-                ConversationState.WAITING_CUSTOM_FILENAME,
-            }
+            and conversation_result.current_state is ConversationState.WAITING_CONFIRMATION
         ):
             try:
                 renamed_file = self._store_pending_batch(received_message)
