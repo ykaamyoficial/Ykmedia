@@ -80,6 +80,23 @@ def test_dashboard_service_returns_real_storage_metrics(tmp_path: Path) -> None:
     assert overview.history[0].final_name == "arquivo.mp3"
 
 
+def test_blocking_snapshot_is_collected_without_an_event_loop(tmp_path: Path) -> None:
+    # A parte sincrona (SQLite + disco) deve rodar fora do event loop.
+    storage = StorageService(database_path=tmp_path / "ykmedia.sqlite3")
+    storage.replace_categories(["Louvores"])
+    service = DashboardService(
+        storage_service=storage,
+        evolution_client=OfflineEvolutionClient(),
+        media_root=tmp_path / "media",
+    )
+
+    snapshot = service._collect_blocking_snapshot()
+
+    assert snapshot.database_connected is True
+    assert snapshot.storage_ready is False
+    assert snapshot.files.categories == ["Louvores"]
+
+
 def test_dashboard_service_marks_evolution_offline_without_breaking(tmp_path: Path) -> None:
     storage = StorageService(database_path=tmp_path / "ykmedia.sqlite3")
     service = DashboardService(
