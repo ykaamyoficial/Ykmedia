@@ -52,7 +52,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Placeholder frontend dist (tauri-build reads it)
+      - name: Placeholder artifacts that tauri-build validates
         shell: bash
-        run: mkdir -p frontend/dist && echo "<!doctype html>" > frontend/dist/index.html
+        run: |
+          mkdir -p frontend/dist
+          echo "<!doctype html>" > frontend/dist/index.html
+          mkdir -p src-tauri/binaries
+          : > src-tauri/binaries/ykmedia-backend-x86_64-pc-windows-msvc.exe
       - run: cargo check --manifest-path src-tauri/Cargo.toml
