@@ -178,8 +178,10 @@ def test_single_file_keeps_original_name_after_rename_decision(tmp_path: Path) -
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
-    result = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    confirm = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
+    assert confirm.conversation_state is ConversationState.WAITING_CONFIRMATION
     assert result.conversation_state is ConversationState.FINISHED
     assert result.stored_file is not None
     assert result.stored_file.file_name == "IMG1.jpg"
@@ -195,9 +197,11 @@ def test_single_file_can_be_renamed_after_category(tmp_path: Path) -> None:
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
     asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
     ask_name = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "DECIDE1")))
-    result = asyncio.run(use_case.execute(_payload({"conversation": "Culto Domingo"}, "NAME1")))
+    confirm = asyncio.run(use_case.execute(_payload({"conversation": "Culto Domingo"}, "NAME1")))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     assert ask_name.conversation_state is ConversationState.WAITING_CUSTOM_FILENAME
+    assert confirm.conversation_state is ConversationState.WAITING_CONFIRMATION
     assert result.stored_file is not None
     assert result.stored_file.file_name == "Culto Domingo.jpg"
     assert {record.file_name for record in media_repository.list()} == {"Culto Domingo.jpg"}
@@ -209,8 +213,10 @@ def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
     asyncio.run(use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1")))
     asyncio.run(use_case.execute(_payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")))
     asyncio.run(use_case.execute(_payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3")))
-    result = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
+    confirm = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
+    assert confirm.conversation_state is ConversationState.WAITING_CONFIRMATION
     records = media_repository.list()
     assert result.stored_file is not None
     assert [record.media_id for record in records] == ["VID1", "AUD2", "DOC3"]
@@ -266,7 +272,8 @@ def test_youtube_link_uses_same_flow(tmp_path: Path) -> None:
 
     first_result = asyncio.run(use_case.execute(_payload({"conversation": "https://youtu.be/abc"}, "YT1")))
     category_result = asyncio.run(use_case.execute(_payload({"conversation": "3"}, "CAT1")))
-    final_result = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    final_result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     assert youtube.calls == 1
     assert first_result.conversation_state is ConversationState.WAITING_CATEGORY_SELECTION
@@ -332,7 +339,8 @@ def test_records_media_history_after_confirmation(tmp_path: Path) -> None:
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
-    result = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
+    result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     history = storage_service.list_media_history()
     assert result.conversation_state is ConversationState.FINISHED
@@ -528,7 +536,8 @@ def test_pending_media_survives_backend_restart(tmp_path: Path) -> None:
 
     # Nova instancia (reinicio): mesmo banco e mesmo disco de staging.
     after_restart = _persistent_use_case(tmp_path)
-    result = asyncio.run(after_restart.execute(_payload({"conversation": "1"}, "NAME1")))
+    asyncio.run(after_restart.execute(_payload({"conversation": "1"}, "NAME1")))
+    result = asyncio.run(after_restart.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     assert result.conversation_state is ConversationState.FINISHED
     assert result.stored_file is not None

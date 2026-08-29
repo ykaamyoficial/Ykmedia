@@ -145,19 +145,47 @@ def test_single_file_asks_if_user_wants_to_rename_after_category() -> None:
     assert session.category == "Louvores"
 
 
-def test_keep_original_name_finishes_single_file_flow() -> None:
+def test_keep_original_name_goes_to_confirmation_then_finishes() -> None:
     engine = ConversationEngine(session_store=MemorySessionStore())
 
     engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
     engine.handle(_message("1"))
-    result = engine.handle(_message("1"))
-    session = engine.get_session("556299999999@s.whatsapp.net")
+    confirmation = engine.handle(_message("1"))
+    result = engine.handle(_message("confirmar"))
 
-    assert result.current_state is ConversationState.WAITING_FILENAME_DECISION
+    assert confirmation.next_state is ConversationState.WAITING_CONFIRMATION
+    assert "Passo 3 de 3" in confirmation.suggested_response
+    assert "Louvores" in confirmation.suggested_response
+    assert result.current_state is ConversationState.WAITING_CONFIRMATION
     assert result.next_state is ConversationState.FINISHED
     assert result.is_finished is True
     assert "salvo em *Louvores*" in result.suggested_response
-    assert session is not None
+
+
+def test_confirmation_cancel_resets_session() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message("1"))
+    engine.handle(_message("1"))
+
+    result = engine.handle(_message("cancelar"))
+
+    assert result.next_state is ConversationState.IDLE
+    assert result.is_finished is True
+    assert engine.get_session("556299999999@s.whatsapp.net") is None
+
+
+def test_confirmation_correct_returns_to_category() -> None:
+    engine = ConversationEngine(session_store=MemorySessionStore())
+    engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
+    engine.handle(_message("1"))
+    engine.handle(_message("1"))
+
+    result = engine.handle(_message("corrigir"))
+    session = engine.get_session("556299999999@s.whatsapp.net")
+
+    assert result.next_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert session is not None and session.category is None
 
 
 def test_invalid_category_keeps_state() -> None:
@@ -193,6 +221,7 @@ def test_restarts_new_session_after_finished_flow() -> None:
     engine.handle(_message(message_type=MessageType.IMAGE, raw_type="imageMessage"))
     engine.handle(_message("1"))
     engine.handle(_message("1"))
+    engine.handle(_message("confirmar"))
     result = engine.handle(_message(message_type=MessageType.AUDIO, raw_type="audioMessage"))
 
     assert result.current_state is ConversationState.IDLE

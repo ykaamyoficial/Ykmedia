@@ -2,6 +2,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 import logging
 import time
+import unicodedata
 from typing import TYPE_CHECKING
 
 from app.core.config import settings
@@ -26,6 +27,14 @@ def _first_name(display_name: str | None) -> str | None:
         return None
     first = display_name.strip().split()
     return first[0] if first else None
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", value.strip())
+        if not unicodedata.combining(char)
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -133,6 +142,11 @@ class ConversationEngine:
 
         if current_state is ConversationState.WAITING_CUSTOM_FILENAME:
             return self._handle_custom_filename(sender_id, session, current_state, text)
+
+        if current_state is ConversationState.WAITING_CONFIRMATION:
+            return self._handle_confirmation(
+                sender_id, session, current_state, text, message.interaction
+            )
 
         return ConversationResult(
             current_state=current_state,
@@ -272,15 +286,9 @@ class ConversationEngine:
                 is_finished=False,
             )
 
-        session.state = ConversationState.FINISHED
-        self._clear_allowed_options(session)
-        self._session_store.update(sender_id, session)
-        return ConversationResult(
-            current_state=current_state,
-            next_state=session.state,
-            suggested_response=self._finished_message(session),
-            is_finished=True,
-        )
+        # Lote: sem passo de nome (numeracao automatica) -> vai direto confirmar.
+        session.filename = KEEP_ORIGINAL_FILENAME
+        return self._go_to_confirmation(sender_id, session, current_state)
 
     def _handle_filename_decision(
         self,
@@ -294,7 +302,7 @@ class ConversationEngine:
         normalized_option_id = option_id.lower()
         if normalized_option_id == "filename:keep_original" or text == "1":
             session.filename = KEEP_ORIGINAL_FILENAME
-            return self._finish(sender_id, session, current_state)
+            return self._go_to_confirmation(sender_id, session, current_state)
 
         if normalized_option_id == "filename:custom" or text == "2":
             session.state = ConversationState.WAITING_CUSTOM_FILENAME
@@ -343,7 +351,74 @@ class ConversationEngine:
             )
 
         session.filename = text
-        return self._finish(sender_id, session, current_state)
+        return self._go_to_confirmation(sender_id, session, current_state)
+
+    def _go_to_confirmation(
+        self,
+        sender_id: str,
+        session: ConversationSession,
+        current_state: ConversationState,
+    ) -> ConversationResult:
+        session.state = ConversationState.WAITING_CONFIRMATION
+        session.last_interaction_at = self._now()
+        prompt = self._menu_builder.build_confirmation_menu()
+        self._set_allowed_options(session, prompt)
+        self._session_store.update(sender_id, session)
+        body = WhatsAppMessageCatalog.confirmation_step(
+            category=session.category,
+            filename=session.filename,
+            count=self._pending_media_count(session),
+        )
+        return ConversationResult(
+            current_state=current_state,
+            next_state=session.state,
+            suggested_response=body,
+            is_finished=False,
+            interactive_prompt=replace(prompt, text=body),
+        )
+
+    def _handle_confirmation(
+        self,
+        sender_id: str,
+        session: ConversationSession,
+        current_state: ConversationState,
+        text: str,
+        interaction: IncomingInteraction | None,
+    ) -> ConversationResult:
+        option_id = self._option_id(text=text, interaction=interaction).lower()
+        normalized = _strip_accents(text.lower())
+
+        if option_id == "confirm:yes" or normalized in {"confirmar", "confirmar envio", "sim", "1"}:
+            return self._finish(sender_id, session, current_state)
+
+        if option_id == "confirm:edit" or normalized in {"corrigir", "2"}:
+            session.state = ConversationState.WAITING_CATEGORY_SELECTION
+            session.category = None
+            session.filename = None
+            prompt = self._menu_builder.build_category_menu(self._category_service)
+            self._set_allowed_options(session, prompt)
+            self._session_store.update(sender_id, session)
+            return self._category_prompt_result(current_state, session, prompt)
+
+        if option_id == "confirm:cancel" or normalized in {"cancelar", "3"}:
+            self.reset(sender_id)
+            return ConversationResult(
+                current_state=current_state,
+                next_state=ConversationState.IDLE,
+                suggested_response=WhatsAppMessageCatalog.command_cancelled(),
+                is_finished=True,
+            )
+
+        prompt = self._menu_builder.build_confirmation_menu()
+        self._set_allowed_options(session, prompt)
+        self._session_store.update(sender_id, session)
+        return ConversationResult(
+            current_state=current_state,
+            next_state=current_state,
+            suggested_response=WhatsAppMessageCatalog.invalid_confirmation(),
+            is_finished=False,
+            interactive_prompt=prompt,
+        )
 
     def _finish(
         self,
