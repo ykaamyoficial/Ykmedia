@@ -30,16 +30,22 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    from app.services.application_factory import get_queue_retry_worker
+    from app.services.application_factory import (
+        get_queue_retry_worker,
+        get_session_expiry_notifier,
+    )
 
-    worker = None
+    workers = []
     if settings.QUEUE_RETRY_WORKER_ENABLED:
-        worker = get_queue_retry_worker()
+        workers.append(get_queue_retry_worker())
+    if settings.SESSION_EXPIRY_NOTIFIER_ENABLED:
+        workers.append(get_session_expiry_notifier())
+    for worker in workers:
         worker.start()
     try:
         yield
     finally:
-        if worker is not None:
+        for worker in workers:
             await worker.stop()
         await get_evolution_client().aclose()
 

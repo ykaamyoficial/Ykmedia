@@ -149,10 +149,10 @@ def test_image_starts_session_without_saving_file(tmp_path: Path) -> None:
     result = asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
 
     assert result.received_message is not None
-    assert result.conversation_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert result.conversation_state is ConversationState.WAITING_MEDIA
     assert result.stored_file is None
     assert result.next_message is not None
-    assert "Em qual categoria" in result.next_message
+    assert "Concluir envio" in result.next_message
     assert media_repository.list() == []
     assert list(tmp_path.rglob("*")) == []
     session = engine.get_session("556299999999@s.whatsapp.net")
@@ -164,6 +164,7 @@ def test_single_file_category_asks_for_rename_before_saving(tmp_path: Path) -> N
     use_case, media_repository, engine = _use_case(tmp_path)
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     result = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
 
     assert result.conversation_state is ConversationState.WAITING_FILENAME_DECISION
@@ -177,6 +178,7 @@ def test_single_file_keeps_original_name_after_rename_decision(tmp_path: Path) -
     use_case, media_repository, engine = _use_case(tmp_path)
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
     confirm = asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
     result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
@@ -195,6 +197,7 @@ def test_single_file_can_be_renamed_after_category(tmp_path: Path) -> None:
     use_case, media_repository, _ = _use_case(tmp_path)
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
     ask_name = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "DECIDE1")))
     confirm = asyncio.run(use_case.execute(_payload({"conversation": "Culto Domingo"}, "NAME1")))
@@ -213,6 +216,7 @@ def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
     asyncio.run(use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1")))
     asyncio.run(use_case.execute(_payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")))
     asyncio.run(use_case.execute(_payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     confirm = asyncio.run(use_case.execute(_payload({"conversation": "2"}, "CAT1")))
     result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
@@ -225,45 +229,24 @@ def test_multiple_files_are_saved_in_received_order(tmp_path: Path) -> None:
     assert all(Path(record.relative_path).parts[0] == "Mensagens" for record in records)
 
 
-def test_grouping_window_sends_single_prompt_with_updated_batch_summary(tmp_path: Path) -> None:
-    media_repository = InMemoryMediaRepository()
-    file_storage = FileStorage(root_directory=tmp_path)
-    conversation_engine = ConversationEngine(session_store=MemorySessionStore())
-    pipeline = MessagePipeline(
-        download_manager=FakeDownloadManager(),
-        file_storage=file_storage,
-        conversation_engine=conversation_engine,
+def test_collecting_state_absorbs_files_and_concluir_shows_combined_summary(tmp_path: Path) -> None:
+    use_case, _, _ = _use_case(tmp_path)
+
+    first = asyncio.run(use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1")))
+    second = asyncio.run(use_case.execute(_payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")))
+    third = asyncio.run(
+        use_case.execute(_payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3"))
     )
-    use_case = ReceiveMediaUseCase(
-        message_pipeline=pipeline,
-        media_repository=media_repository,
-        file_storage=file_storage,
-        media_grouping_window_seconds=0.05,
-    )
+    done = asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
 
-    async def execute_batch() -> list[object]:
-        first_task = asyncio.create_task(
-            use_case.execute(_payload({"videoMessage": {"mimetype": "video/mp4"}}, "VID1"))
-        )
-        await asyncio.sleep(0.01)
-        second_result = await use_case.execute(
-            _payload({"audioMessage": {"mimetype": "audio/mpeg"}}, "AUD2")
-        )
-        third_result = await use_case.execute(
-            _payload({"documentMessage": {"mimetype": "application/pdf"}}, "DOC3")
-        )
-        first_result = await first_task
-        return [first_result, second_result, third_result]
-
-    first_result, second_result, third_result = asyncio.run(execute_batch())
-
-    assert first_result.next_message is not None
-    assert "Recebi *3 arquivos*" in first_result.next_message
-    assert "1 vídeo" in first_result.next_message
-    assert "1 áudio" in first_result.next_message
-    assert "1 documento" in first_result.next_message
-    assert not second_result.next_message
-    assert not third_result.next_message
+    assert first.conversation_state is ConversationState.WAITING_MEDIA
+    assert not second.next_message
+    assert not third.next_message
+    assert done.next_message is not None
+    assert "Recebi *3 arquivos*" in done.next_message
+    assert "1 vídeo" in done.next_message
+    assert "1 áudio" in done.next_message
+    assert "1 documento" in done.next_message
 
 
 def test_youtube_link_uses_same_flow(tmp_path: Path) -> None:
@@ -271,12 +254,13 @@ def test_youtube_link_uses_same_flow(tmp_path: Path) -> None:
     use_case, media_repository, _ = _use_case(tmp_path, youtube=youtube)
 
     first_result = asyncio.run(use_case.execute(_payload({"conversation": "https://youtu.be/abc"}, "YT1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     category_result = asyncio.run(use_case.execute(_payload({"conversation": "3"}, "CAT1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
     final_result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
 
     assert youtube.calls == 1
-    assert first_result.conversation_state is ConversationState.WAITING_CATEGORY_SELECTION
+    assert first_result.conversation_state is ConversationState.WAITING_MEDIA
     assert category_result.conversation_state is ConversationState.WAITING_FILENAME_DECISION
     assert final_result.stored_file is not None
     assert media_repository.list()[0].file_name == "youtube.mp4"
@@ -338,6 +322,7 @@ def test_records_media_history_after_confirmation(tmp_path: Path) -> None:
     )
 
     asyncio.run(use_case.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1")))
+    asyncio.run(use_case.execute(_payload({"conversation": "concluir"}, "DONE1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "CAT1")))
     asyncio.run(use_case.execute(_payload({"conversation": "1"}, "NAME1")))
     result = asyncio.run(use_case.execute(_payload({"conversation": "confirmar"}, "OK1")))
@@ -370,7 +355,7 @@ def test_records_inbound_media_conversation_message(tmp_path: Path) -> None:
     assert result.next_message is not None
     assert len(messages) == 1
     assert messages[0].message_type == "imagem"
-    assert messages[0].state == ConversationState.WAITING_CATEGORY_SELECTION.value
+    assert messages[0].state == ConversationState.WAITING_MEDIA.value
 
 
 def test_text_after_one_day_receives_usage_info(tmp_path: Path) -> None:
@@ -532,6 +517,7 @@ def test_pending_media_survives_backend_restart(tmp_path: Path) -> None:
     asyncio.run(
         before_restart.execute(_payload({"imageMessage": {"mimetype": "image/jpeg"}}, "IMG1"))
     )
+    asyncio.run(before_restart.execute(_payload({"conversation": "concluir"}, "DONE1")))
     asyncio.run(before_restart.execute(_payload({"conversation": "1"}, "CAT1")))
 
     # Nova instancia (reinicio): mesmo banco e mesmo disco de staging.

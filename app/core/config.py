@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     CONVERSATION_SESSION_TTL_SECONDS: float = 3600.0
     # Tempo sem resposta ate a conversa expirar (o cliente e avisado antes).
     CONVERSATION_FLOW_TIMEOUT_SECONDS: float = 1800.0
+    # Manda o aviso "sua conversa expira em breve" quando faltar este tanto.
+    SESSION_EXPIRY_WARNING_SECONDS: float = 300.0
+    SESSION_EXPIRY_NOTIFIER_ENABLED: bool = True
     # Janela para agrupar varios arquivos enviados em sequencia num unico lote.
     MEDIA_GROUPING_WINDOW_SECONDS: float = 8.0
     YOUTUBE_DOWNLOAD_TEMP_ROOT: str = "downloads/youtube"

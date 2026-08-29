@@ -44,7 +44,7 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, received_types
                 FROM conversation_sessions
                 WHERE sender_id = ?
                 """,
@@ -71,6 +71,7 @@ class StorageService:
         contact_id: str | None = None,
         contact_name: str | None = None,
         greeting_sent: bool = False,
+        expiry_warning_sent: bool = False,
         received_types: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         with self._lock, self._connect() as connection:
@@ -80,9 +81,9 @@ class StorageService:
                     sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, received_types
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sender_id) DO UPDATE SET
                     state = excluded.state,
                     category = excluded.category,
@@ -99,6 +100,7 @@ class StorageService:
                     contact_id = excluded.contact_id,
                     contact_name = excluded.contact_name,
                     greeting_sent = excluded.greeting_sent,
+                    expiry_warning_sent = excluded.expiry_warning_sent,
                     received_types = excluded.received_types
                 """,
                 (
@@ -118,6 +120,7 @@ class StorageService:
                     contact_id,
                     contact_name,
                     1 if greeting_sent else 0,
+                    1 if expiry_warning_sent else 0,
                     json.dumps(list(received_types or ())),
                 ),
             )
@@ -136,11 +139,38 @@ class StorageService:
                 SELECT sender_id, state, category, filename, pending_media_id, updated_at,
                     allowed_option_ids, processed_interaction_ids, interactive_created_at,
                     created_at, expires_at, last_interaction_at, origin, contact_id,
-                    contact_name, greeting_sent, received_types
+                    contact_name, greeting_sent, expiry_warning_sent, received_types
                 FROM conversation_sessions
                 """
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def list_sessions_pending_expiry_warning(
+        self,
+        now: float,
+        warn_before: float,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT sender_id, expires_at
+                FROM conversation_sessions
+                WHERE expiry_warning_sent = 0
+                  AND state != 'IDLE'
+                  AND expires_at IS NOT NULL
+                  AND expires_at > ?
+                  AND expires_at <= ?
+                """,
+                (now, warn_before),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_expiry_warning_sent(self, sender_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE conversation_sessions SET expiry_warning_sent = 1 WHERE sender_id = ?",
+                (sender_id,),
+            )
 
     def delete_expired_sessions(self, expires_before: float) -> int:
         with self._lock, self._connect() as connection:
@@ -855,6 +885,7 @@ class StorageService:
                     origin TEXT,
                     contact_id TEXT,
                     greeting_sent INTEGER NOT NULL DEFAULT 0,
+                    expiry_warning_sent INTEGER NOT NULL DEFAULT 0,
                     received_types TEXT NOT NULL DEFAULT '[]',
                     updated_at REAL NOT NULL
                 );
@@ -1016,6 +1047,12 @@ class StorageService:
                 connection=connection,
                 table_name="conversation_sessions",
                 column_name="greeting_sent",
+                definition="INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                connection=connection,
+                table_name="conversation_sessions",
+                column_name="expiry_warning_sent",
                 definition="INTEGER NOT NULL DEFAULT 0",
             )
             self._ensure_column(

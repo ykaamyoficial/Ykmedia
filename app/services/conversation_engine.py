@@ -79,6 +79,7 @@ class ConversationSession:
     contact_id: str | None = None
     contact_name: str | None = None
     greeting_sent: bool = False
+    expiry_warning_sent: bool = False
     received_types: tuple[str, ...] = ()
 
 
@@ -133,6 +134,11 @@ class ConversationEngine:
 
         if self._is_valid_media(message):
             return self._append_media(sender_id, session, current_state, message)
+
+        if current_state is ConversationState.WAITING_MEDIA:
+            return self._handle_collecting(
+                sender_id, session, current_state, text, message.interaction
+            )
 
         if current_state is ConversationState.WAITING_CATEGORY_SELECTION:
             return self._handle_category(sender_id, session, current_state, text, message.interaction)
@@ -202,8 +208,8 @@ class ConversationEngine:
         current_state: ConversationState,
         message: ReceivedMessage,
     ) -> ConversationResult:
-        session.state = ConversationState.WAITING_CATEGORY_SELECTION
         now = self._now()
+        session.state = ConversationState.WAITING_MEDIA
         session.created_at = now
         session.last_interaction_at = now
         session.expires_at = now + _session_timeout_seconds()
@@ -212,10 +218,61 @@ class ConversationEngine:
         session.origin = "YouTube" if message.raw_type == "youtubeMessage" else "WhatsApp"
         session.greeting_sent = True
         self._append_type(session, message)
-        prompt = self._menu_builder.build_category_menu(self._category_service)
+        prompt = self._menu_builder.build_collecting_menu()
         self._set_allowed_options(session, prompt)
         self._session_store.update(sender_id, session)
-        return self._category_prompt_result(current_state, session, prompt, greet=True)
+        return self._collecting_result(current_state, session, prompt, greet=True)
+
+    def _collecting_result(
+        self,
+        current_state: ConversationState,
+        session: ConversationSession,
+        prompt: InteractivePrompt,
+        *,
+        greet: bool = False,
+        nudge: bool = False,
+    ) -> ConversationResult:
+        body = WhatsAppMessageCatalog.collecting_step(
+            summary=self._session_summary(session),
+            contact_name=session.contact_name if greet else None,
+            nudge=nudge,
+        )
+        return ConversationResult(
+            current_state=current_state,
+            next_state=session.state,
+            suggested_response=body,
+            is_finished=False,
+            interactive_prompt=replace(prompt, text=body),
+        )
+
+    def _handle_collecting(
+        self,
+        sender_id: str,
+        session: ConversationSession,
+        current_state: ConversationState,
+        text: str,
+        interaction: IncomingInteraction | None,
+    ) -> ConversationResult:
+        option_id = self._option_id(text=text, interaction=interaction).lower()
+        normalized = _strip_accents(text.lower())
+        if option_id == "collect:done" or normalized in {
+            "concluir",
+            "concluir envio",
+            "pronto",
+            "terminei",
+            "finalizar",
+            "ok",
+        }:
+            session.state = ConversationState.WAITING_CATEGORY_SELECTION
+            prompt = self._menu_builder.build_category_menu(self._category_service)
+            self._set_allowed_options(session, prompt)
+            self._session_store.update(sender_id, session)
+            return self._category_prompt_result(current_state, session, prompt)
+
+        prompt = self._menu_builder.build_collecting_menu()
+        self._set_allowed_options(session, prompt)
+        self._session_store.update(sender_id, session)
+        return self._collecting_result(current_state, session, prompt, nudge=True)
 
     def _append_media(
         self,
@@ -227,6 +284,7 @@ class ConversationEngine:
         self._append_type(session, message)
         session.last_interaction_at = self._now()
         session.expires_at = self._now() + _session_timeout_seconds()
+        session.expiry_warning_sent = False
         self._session_store.update(sender_id, session)
         logger.info(
             "Midia adicionada a sessao: telefone=%s quantidade=%s",

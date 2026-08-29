@@ -81,6 +81,32 @@ class WhatsAppMessageCatalog:
     def correct_title(cls) -> str:
         return "Corrigir"
 
+    @classmethod
+    def collect_done_title(cls) -> str:
+        return "Concluir envio"
+
+    # ----- coleta de arquivos -----
+
+    @classmethod
+    def collecting_step(
+        cls,
+        summary: str,
+        contact_name: str | None = None,
+        nudge: bool = False,
+    ) -> str:
+        if nudge:
+            return (
+                "Ainda não terminou? Pode enviar mais arquivos, ou toque em "
+                "*Concluir envio* quando estiver pronto."
+            )
+        saudacao = f"Olá, {contact_name}! 👋" if contact_name else "Olá! 👋"
+        return (
+            f"{saudacao} Aqui é o assistente da {_TEAM}.\n\n"
+            f"{summary} Pode continuar enviando — quando terminar, toque em "
+            "*Concluir envio* e eu te ajudo a organizar (categoria, nome e confirmação).\n"
+            "_(para sair, envie *cancelar*)_"
+        )
+
     # ----- passo 1: categoria -----
 
     @classmethod
@@ -187,6 +213,13 @@ class WhatsAppMessageCatalog:
     @classmethod
     def conversation_finished(cls) -> str:
         return "Envie um arquivo quando precisar organizar mais alguma coisa."
+
+    @classmethod
+    def expiry_warning(cls) -> str:
+        return (
+            "Ainda está aí? Sua conversa expira em *5 minutos*. "
+            "Envie qualquer mensagem para continuar de onde parou."
+        )
 
     @classmethod
     def conversation_timeout(cls) -> str:
@@ -310,6 +343,7 @@ class WhatsAppMessageCatalog:
     @staticmethod
     def _friendly_state(state: str) -> str:
         return {
+            "AGUARDANDO_MIDIA": "recebendo os arquivos",
             "AGUARDANDO_CATEGORIA": "escolha da categoria",
             "AGUARDANDO_RENOMEAR": "escolha do nome",
             "AGUARDANDO_NOME_ARQUIVO": "digitação do nome",

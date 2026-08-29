@@ -32,6 +32,7 @@ from app.services.message_pipeline import MessagePipeline
 from app.services.message_response_sender import MessageResponseSender
 from app.services.processing_queue import ProcessingQueue, ProcessingWorker
 from app.services.queue_retry_worker import QueueRetryWorker, WebhookJobReprocessor
+from app.services.session_expiry_notifier import SessionExpiryNotifier
 from app.services.receive_media_use_case import ReceiveMediaUseCase
 from app.services.session_store import SQLiteSessionStore
 from app.services.settings_query_service import SettingsQueryService
@@ -107,6 +108,15 @@ def get_processing_queue() -> ProcessingQueue:
 @lru_cache(maxsize=1)
 def get_processing_worker() -> ProcessingWorker:
     return ProcessingWorker()
+
+
+@lru_cache(maxsize=1)
+def get_session_expiry_notifier() -> SessionExpiryNotifier:
+    return SessionExpiryNotifier(
+        storage_service=get_storage_service(),
+        evolution_client=get_evolution_client(),
+        warning_seconds=settings.SESSION_EXPIRY_WARNING_SECONDS,
+    )
 
 
 @lru_cache(maxsize=1)
