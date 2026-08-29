@@ -47,8 +47,36 @@ def process_message(message: ReceivedMessage) -> ProcessingDecision:
     return _decide_action(message)
 
 
+#: Palavras que valem como comando mesmo sem o prefixo "!", quando sao a
+#: mensagem inteira (evita confundir com um nome de arquivo digitado).
+BARE_COMMAND_WORDS = {
+    "ajuda",
+    "menu",
+    "cancelar",
+    "status",
+    "recomecar",
+    "recomeçar",
+    "reiniciar",
+    "versao",
+    "versão",
+}
+
+
 def is_command_message(message: ReceivedMessage) -> bool:
-    return bool(message.text and message.text.strip().startswith("!"))
+    text = (message.text or "").strip()
+    if text.startswith("!"):
+        return True
+    return _strip_accents(text.lower()) in {_strip_accents(w) for w in BARE_COMMAND_WORDS}
+
+
+def _strip_accents(value: str) -> str:
+    import unicodedata
+
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", value)
+        if not unicodedata.combining(char)
+    )
 
 
 def _decide_action(message: ReceivedMessage) -> ProcessingDecision:

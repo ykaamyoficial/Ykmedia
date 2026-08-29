@@ -240,6 +240,7 @@ def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
         state=ConversationState.WAITING_FILENAME_DECISION,
         category="Louvores",
         filename=None,
+        contact_name="Marina",
         pending_media_id="MSG1",
         allowed_option_ids=("filename:keep_original", "filename:custom"),
         processed_interaction_ids=("CLICK1",),
@@ -262,6 +263,7 @@ def test_persists_conversation_sessions_after_restart(tmp_path: Path) -> None:
     )
     assert restored_session.processed_interaction_ids == ("CLICK1",)
     assert restored_session.interactive_created_at == 123.0
+    assert restored_session.contact_name == "Marina"
 
 
 def test_adds_retry_columns_to_existing_processing_jobs_table(tmp_path: Path) -> None:

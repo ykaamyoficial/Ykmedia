@@ -129,7 +129,19 @@ def test_does_not_identify_regular_text_as_command() -> None:
         sender=Sender(remote_jid="556299999999@s.whatsapp.net"),
         message_type=MessageType.TEXT,
         raw_type="conversation",
-        text="ajuda",
+        text="Boa noite, tudo bem?",
     )
 
     assert is_command_message(message) is False
+
+
+def test_bare_command_words_are_recognized_without_bang() -> None:
+    for word in ("cancelar", "Status", "recomeçar", "AJUDA"):
+        message = ReceivedMessage(
+            message_id="MSG1",
+            sender=Sender(remote_jid="556299999999@s.whatsapp.net"),
+            message_type=MessageType.TEXT,
+            raw_type="conversation",
+            text=word,
+        )
+        assert is_command_message(message) is True
