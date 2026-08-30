@@ -61,8 +61,10 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Accept", "Content-Type"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        # "Authorization" e obrigatorio: a interface envia o token da API nele.
+        # Sem isso o preflight falha e o app inteiro fica "Backend offline".
+        allow_headers=["Accept", "Authorization", "Content-Type"],
     )
 
     protected = [Depends(require_api_token)]
