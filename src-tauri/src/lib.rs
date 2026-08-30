@@ -26,19 +26,22 @@ fn open_media_file(path: String) -> Result<(), String> {
     open_path(&path)
 }
 
+fn read_api_token() -> Option<String> {
+    let token_file = runtime_root().ok()?.join("data").join("api_token");
+    let content = fs::read_to_string(token_file).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[tauri::command]
 fn api_token() -> Result<String, String> {
-    let token_file = runtime_root()
-        .map_err(|error| error.to_string())?
-        .join("data")
-        .join("api_token");
-
     for _ in 0..BACKEND_STARTUP_ATTEMPTS {
-        if let Ok(content) = fs::read_to_string(&token_file) {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                return Ok(trimmed.to_string());
-            }
+        if let Some(token) = read_api_token() {
+            return Ok(token);
         }
         std::thread::sleep(BACKEND_STARTUP_INTERVAL);
     }
@@ -270,9 +273,21 @@ fn request_system_preparation() -> std::io::Result<()> {
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(3))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     stream.set_read_timeout(Some(Duration::from_secs(1_200)))?;
-    stream.write_all(
-        b"POST /settings/prepare HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-    )?;
+    // /settings/* exige o token da API. Sem este cabecalho o backend responde
+    // 401 e a preparacao automatica nunca roda — numa maquina nova isso
+    // significa que o Docker e a Evolution jamais sobem sozinhos.
+    let authorization = match read_api_token() {
+        Some(token) => format!("Authorization: Bearer {token}\r\n"),
+        None => String::new(),
+    };
+    let request = format!(
+        "POST /settings/prepare HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         {authorization}\
+         Content-Length: 0\r\n\
+         Connection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes())?;
 
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
@@ -280,7 +295,8 @@ fn request_system_preparation() -> std::io::Result<()> {
         return Ok(());
     }
 
-    Err(std::io::Error::other(
-        "backend rejected the automatic preparation request",
-    ))
+    let status = response.lines().next().unwrap_or("sem resposta").to_string();
+    Err(std::io::Error::other(format!(
+        "backend rejected the automatic preparation request ({status})"
+    )))
 }
