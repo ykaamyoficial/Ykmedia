@@ -1,6 +1,6 @@
 [package]
 name = "ykmedia"
-version = "0.3.1"
+version = "0.3.2"
 description = "YkMedia desktop"
 authors = ["YkMedia"]
 edition = "2021"

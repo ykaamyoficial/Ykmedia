@@ -243,6 +243,13 @@ class WhatsAppMessageCatalog:
         return "Envie um arquivo quando precisar organizar mais alguma coisa."
 
     @classmethod
+    def link_processing(cls) -> str:
+        return (
+            "Recebi seu link e estou baixando o vídeo — isso pode levar alguns minutos. ⏳\n\n"
+            "Assim que terminar, eu te chamo para escolher a categoria."
+        )
+
+    @classmethod
     def expiry_warning(cls) -> str:
         return (
             "Ainda está aí? Sua conversa expira em *5 minutos*. "

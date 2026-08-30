@@ -3,7 +3,7 @@ uvicorn[standard]==0.35.0
 pydantic-settings==2.10.1
 httpx==0.28.1
 pytest==8.4.1
-# Fixado para builds reproduziveis. Bump periodicamente: o YouTube quebra
-# versoes antigas do yt-dlp.
-yt-dlp==2026.7.4
+# Fixado para builds reproduziveis, mas precisa de bump frequente: o YouTube
+# quebra versoes antigas. A 2026.7.4 passou a devolver HTTP 403 nos downloads.
+yt-dlp==2026.8.19
 pyinstaller==6.21.0

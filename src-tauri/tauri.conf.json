@@ -1,7 +1,7 @@
 {
   "$schema": "../frontend/node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "YkMedia",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "identifier": "br.com.ykmedia.desktop",
   "build": {
     "beforeDevCommand": "npm.cmd run dev --prefix ../frontend",

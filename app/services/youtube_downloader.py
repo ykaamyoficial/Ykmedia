@@ -21,11 +21,19 @@ class YoutubeDownloadError(YoutubeDownloaderError):
 
 
 class YoutubeDownloader:
+    #: O YouTube deixou de oferecer formatos com video e audio juntos sem um
+    #: runtime JavaScript, entao na pratica sempre caimos no par
+    #: video-separado + audio, mesclado depois pelo FFmpeg.
+    #:
+    #: A altura e limitada porque "bestvideo" escolhe 4K: um video de culto
+    #: passava de 1 GB, gastando banda e demorando minutos. Ate 1080p e mais do
+    #: que suficiente para projecao.
     _VIDEO_WITH_AUDIO_FORMAT = (
-        "best[ext=mp4][vcodec!=none][acodec!=none]/"
-        "best[vcodec!=none][acodec!=none]/"
-        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-        "bestvideo+bestaudio"
+        f"best[ext=mp4][vcodec!=none][acodec!=none][height<=?{settings.YOUTUBE_MAX_HEIGHT}]/"
+        f"best[vcodec!=none][acodec!=none][height<=?{settings.YOUTUBE_MAX_HEIGHT}]/"
+        f"bestvideo[ext=mp4][height<=?{settings.YOUTUBE_MAX_HEIGHT}]+bestaudio[ext=m4a]/"
+        f"bestvideo[height<=?{settings.YOUTUBE_MAX_HEIGHT}]+bestaudio/"
+        "bestvideo+bestaudio/best"
     )
     _SUPPORTED_HOSTS = {
         "youtube.com",

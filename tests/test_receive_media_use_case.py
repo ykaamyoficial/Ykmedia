@@ -557,3 +557,37 @@ def test_pending_media_survives_backend_restart(tmp_path: Path) -> None:
     assert result.conversation_state is ConversationState.FINISHED
     assert result.stored_file is not None
     assert Path(result.stored_file.absolute_path).exists()
+
+
+def test_failed_youtube_download_warns_instead_of_going_silent(tmp_path: Path) -> None:
+    """Link que falha ao baixar nao pode virar silencio.
+
+    Como o download falhou, a mensagem continua sendo texto e a conversa nao
+    comeca — antes o cliente ficava sem resposta nenhuma enquanto o worker
+    tentava de novo em segundo plano.
+    """
+
+    class FailingYoutube(FakeYoutubeDownloader):
+        async def download(self, message: ReceivedMessage) -> DownloadedMedia:
+            raise RuntimeError("HTTP Error 403: Forbidden")
+
+    use_case, _, _ = _use_case(tmp_path, youtube=FailingYoutube())
+
+    result = asyncio.run(
+        use_case.execute(_payload({"conversation": "https://youtu.be/abc"}, "YT1"))
+    )
+
+    assert result.next_message is not None
+    assert "baixando o vídeo" in result.next_message
+    assert any(error.startswith("youtube:") for error in result.errors)
+
+
+def test_successful_youtube_download_still_starts_the_flow(tmp_path: Path) -> None:
+    use_case, _, _ = _use_case(tmp_path, youtube=FakeYoutubeDownloader())
+
+    result = asyncio.run(
+        use_case.execute(_payload({"conversation": "https://youtu.be/abc"}, "YT1"))
+    )
+
+    assert result.conversation_state is ConversationState.WAITING_MEDIA
+    assert "Concluir envio" in (result.next_message or "")

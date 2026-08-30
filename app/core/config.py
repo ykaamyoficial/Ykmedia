@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "YkMedia"
-    APP_VERSION: str = "0.3.1"
+    APP_VERSION: str = "0.3.2"
 
     ENVIRONMENT: str = "development"
     WEBHOOK_SECRET: str = ""
@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Janela para agrupar varios arquivos enviados em sequencia num unico lote.
     MEDIA_GROUPING_WINDOW_SECONDS: float = 8.0
     YOUTUBE_DOWNLOAD_TEMP_ROOT: str = "downloads/youtube"
+    # Altura maxima do video baixado do YouTube. Sem limite o yt-dlp escolhe 4K
+    # (mais de 1 GB por video), o que nao faz sentido para projecao no culto.
+    YOUTUBE_MAX_HEIGHT: int = 1080
     FFMPEG_PATH: str = ""
     SQLITE_DATABASE_PATH: str = "data/ykmedia.sqlite3"
 
