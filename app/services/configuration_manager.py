@@ -327,16 +327,31 @@ class AutomaticSetupService:
         steps: list[SetupStepResult] = []
         steps.append(self._safe_step("config", "Configuracao", self._configuration_manager.ensure_defaults))
         steps.append(self._safe_step("directories", "Pastas", self._configuration_manager.ensure_directories))
-        steps.append(self._safe_step("environment", "Ambiente", self._environment_step))
+        environment_step = self._safe_step("environment", "Ambiente", self._environment_step)
+        steps.append(environment_step)
         steps.append(self._safe_step("backend", "Backend", self._backend_step))
-        license_step = self._safe_step("license", "Licenca da Evolution", self._license_step)
-        steps.append(license_step)
-        # Sem licenca a Evolution responde 503 em tudo: provisionar so gastaria
-        # tempo para falhar com uma mensagem confusa.
-        if license_step.status is not SetupStepStatus.ERROR:
+
+        # Sem containers, licenca e Evolution so repetem a mesma causa com outras
+        # palavras. A tela mostrava tres erros para um problema so, escondendo
+        # qual deles precisava de acao.
+        if environment_step.status is SetupStepStatus.ERROR:
             steps.append(
-                self._safe_step("evolution", "Evolution", self._evolution_provisioning_manager.provision)
+                SetupStepResult(
+                    "license",
+                    "Licenca da Evolution",
+                    SetupStepStatus.PENDING,
+                    "Aguardando os containers subirem — resolva a etapa Ambiente primeiro.",
+                )
             )
+        else:
+            license_step = self._safe_step("license", "Licenca da Evolution", self._license_step)
+            steps.append(license_step)
+            # Sem licenca a Evolution responde 503 em tudo: provisionar so gastaria
+            # tempo para falhar com uma mensagem confusa.
+            if license_step.status is not SetupStepStatus.ERROR:
+                steps.append(
+                    self._safe_step("evolution", "Evolution", self._evolution_provisioning_manager.provision)
+                )
         steps.append(self._safe_step("ffmpeg", "FFmpeg", self._ffmpeg_step))
         steps.append(self._safe_step("diagnostic", "Diagnostico", self._diagnostic_step))
         status = self._overall_status(steps)
@@ -377,7 +392,7 @@ class AutomaticSetupService:
                 message="Verificacao de licenca desativada.",
             )
 
-        state = self._license_service.status()
+        state = self._evolution_license_state()
         if state.status in {LicenseStatus.ACTIVE, LicenseStatus.NOT_REQUIRED}:
             return SetupStepResult(
                 key="license",
@@ -404,10 +419,59 @@ class AutomaticSetupService:
             ),
         )
 
+    #: A Evolution roda as migracoes do banco no primeiro arranque e so entao
+    #: passa a atender HTTP. Perguntar imediatamente devolvia UNAVAILABLE e a
+    #: tela acusava "Nao foi possivel falar com a Evolution" sem que nada
+    #: estivesse errado.
+    EVOLUTION_READY_TIMEOUT_SECONDS = 120
+    EVOLUTION_POLL_SECONDS = 4
+
+    def _evolution_license_state(self):
+        from app.services.evolution_license_service import LicenseStatus
+
+        deadline = time.monotonic() + self.EVOLUTION_READY_TIMEOUT_SECONDS
+        while True:
+            state = self._license_service.status()
+            if state.status is not LicenseStatus.UNAVAILABLE:
+                return state
+            if time.monotonic() >= deadline:
+                return state
+            time.sleep(self.EVOLUTION_POLL_SECONDS)
+
     def _environment_step(self) -> SetupStepResult:
         check = self._environment_manager.prepare()
-        status = SetupStepStatus.OK if check.status is EnvironmentStatus.READY else SetupStepStatus.ERROR
-        return SetupStepResult("environment", "Ambiente", status, self._friendly_message(check.message))
+        if check.status is EnvironmentStatus.READY:
+            return SetupStepResult(
+                "environment",
+                "Ambiente",
+                SetupStepStatus.OK,
+                self._friendly_message(check.message),
+            )
+
+        # Numa falha o texto tecnico e a unica pista que o usuario tem para nos
+        # mandar. Acrescentamos o que fazer, sem apagar o que aconteceu.
+        return SetupStepResult(
+            "environment",
+            "Ambiente",
+            SetupStepStatus.ERROR,
+            f"{check.message}\n\n{self._environment_hint(check)}",
+        )
+
+    def _environment_hint(self, check: "EnvironmentCheck") -> str:
+        if not check.docker_installed:
+            return (
+                "O que fazer: instale o Docker Desktop, reinicie o computador e "
+                "clique em Preparar sistema novamente."
+            )
+        if not check.docker_running:
+            return (
+                "O que fazer: abra o Docker Desktop e espere o icone da baleia "
+                "ficar verde. Depois clique em Preparar sistema novamente."
+            )
+        return (
+            "O que fazer: clique em Preparar sistema novamente — o download "
+            "continua de onde parou. Se repetir, envie esta mensagem para o suporte."
+        )
 
     def _backend_step(self) -> SetupStepResult:
         snapshot = self._backend_runtime_manager.start()
@@ -450,6 +514,12 @@ class AutomaticSetupService:
         return SetupStepStatus.OK
 
     def _friendly_message(self, message: str) -> str:
+        """Suaviza o jargao APENAS quando deu certo.
+
+        Antes isto trocava qualquer texto com "Docker" ou "container" pelo texto
+        de sucesso, erros inclusive. A tela mostrava "ERROR / Servicos internos
+        preparados." e o motivo real da falha era perdido para sempre.
+        """
         technical_words = {"Docker", "Compose", "container", "containers"}
         if any(word.lower() in message.lower() for word in technical_words):
             return "Servicos internos preparados."

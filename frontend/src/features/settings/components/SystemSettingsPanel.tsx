@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { YkButton } from "@/components/system/YkButton";
 import { YkStatusBadge } from "@/components/system/YkStatusBadge";
 import { YkDataTable } from "@/shared/tables";
@@ -23,8 +25,24 @@ export function SystemSettingsPanel({
   onPrepare,
   onDiagnostics,
 }: SystemSettingsPanelProps) {
+  const [copied, setCopied] = useState(false);
   const rows = diagnostic?.items ?? [];
   const steps = setup?.steps ?? [];
+  const hasProblem = steps.some((step) => step.status === "ERROR" || step.status === "WARNING");
+
+  // Fotografar a tela corta a mensagem longa. Copiar o relatorio inteiro e a
+  // forma mais rapida de o usuario nos mostrar o que realmente aconteceu.
+  const copyDetails = async () => {
+    const report = steps.map((step) => `[${step.status}] ${step.label}: ${step.message}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   const summary =
     diagnostic?.message ??
     setup?.message ??
@@ -63,7 +81,22 @@ export function SystemSettingsPanel({
 
         {steps.length > 0 && !preparing ? (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Etapas</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-foreground">Etapas</p>
+              {hasProblem ? (
+                <YkButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    void copyDetails();
+                  }}
+                >
+                  <YkIcons.Copy className="h-4 w-4" aria-hidden="true" />
+                  {copied ? "Copiado!" : "Copiar detalhes"}
+                </YkButton>
+              ) : null}
+            </div>
             <ul className="space-y-2">
               {steps.map((step) => (
                 <li

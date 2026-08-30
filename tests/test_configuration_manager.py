@@ -235,3 +235,117 @@ def test_setup_accepts_versions_without_licensing(tmp_path: Path, monkeypatch) -
 
     assert next(s for s in report.steps if s.key == "license").status is SetupStepStatus.OK
     assert "evolution" in [step.key for step in report.steps]
+
+
+class FailingEnvironmentManager:
+    """Reproduz a maquina do usuario: o compose rodou, os containers nao subiram."""
+
+    def prepare(self, install_docker: bool = True) -> EnvironmentCheck:
+        return EnvironmentCheck(
+            status=EnvironmentStatus.ERROR,
+            docker_installed=True,
+            docker_running=True,
+            compose_available=True,
+            containers_running=False,
+            message=(
+                "Docker Compose executou, mas nem todos os containers ficaram ativos:\n"
+                "ykmedia_evolution Exited (1)"
+            ),
+        )
+
+
+def test_environment_failure_keeps_the_real_reason(tmp_path: Path, monkeypatch) -> None:
+    """O motivo da falha nao pode ser trocado pelo texto de sucesso.
+
+    Era o que a tela do usuario mostrava: a etapa Ambiente em ERROR com a
+    mensagem "Servicos internos preparados.". `_friendly_message` substituia
+    qualquer texto com a palavra "Docker" ou "container" -- inclusive os erros --
+    deixando o problema impossivel de diagnosticar.
+    """
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FailingEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+    ).prepare()
+
+    environment = next(step for step in report.steps if step.key == "environment")
+    assert environment.status is SetupStepStatus.ERROR
+    assert "Servicos internos preparados" not in environment.message
+    assert "ykmedia_evolution" in environment.message
+
+
+def test_evolution_steps_are_skipped_when_the_environment_failed(tmp_path: Path, monkeypatch) -> None:
+    """Sem containers, licenca e Evolution so produzem erros derivados.
+
+    Na tela do usuario apareciam tres erros para uma causa unica, escondendo
+    qual deles precisava de acao.
+    """
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FailingEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+    ).prepare()
+
+    keys = [step.key for step in report.steps]
+    assert "evolution" not in keys
+    license_step = next(step for step in report.steps if step.key == "license")
+    assert license_step.status is SetupStepStatus.PENDING
+    assert "containers" in license_step.message.lower()
+
+
+class SlowLicenseService:
+    """A Evolution roda migracoes: leva dezenas de segundos ate atender HTTP."""
+
+    def __init__(self, attempts_until_ready: int) -> None:
+        self._attempts_until_ready = attempts_until_ready
+        self.attempts = 0
+
+    def status(self) -> LicenseState:
+        self.attempts += 1
+        if self.attempts < self._attempts_until_ready:
+            return LicenseState(
+                status=LicenseStatus.UNAVAILABLE,
+                message="Nao foi possivel falar com a Evolution.",
+            )
+        return LicenseState(status=LicenseStatus.ACTIVE, message="licenca ativa")
+
+
+def test_license_waits_for_evolution_to_answer(tmp_path: Path, monkeypatch) -> None:
+    """`compose up` termina antes da Evolution atender.
+
+    Consultar a licenca no mesmo instante devolvia UNAVAILABLE e a tela acusava
+    "Nao foi possivel falar com a Evolution" num ambiente que ficava pronto
+    logo em seguida.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("app.services.configuration_manager.time.sleep", lambda _: None)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+    license_service = SlowLicenseService(attempts_until_ready=4)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FakeEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=license_service,
+    ).prepare()
+
+    license_step = next(step for step in report.steps if step.key == "license")
+    assert license_step.status is SetupStepStatus.OK
+    assert license_service.attempts >= 4
