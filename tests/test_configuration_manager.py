@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.services.backend_runtime_manager import BackendRuntimeSnapshot, BackendRuntimeState
+from app.core.config import settings
 from app.services.configuration_manager import (
     AppConfigurationManager,
     AutomaticSetupService,
@@ -112,6 +113,9 @@ def test_configuration_manager_creates_env_and_directories(tmp_path: Path, monke
 
 def test_ffmpeg_manager_detects_project_binary(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    # settings.FFMPEG_PATH vem do .env: rodar o app a partir do repo cria um e
+    # o teste passava a detectar o FFmpeg da maquina em vez do de tmp_path.
+    monkeypatch.setattr(settings, "FFMPEG_PATH", "")
     monkeypatch.setattr("app.services.configuration_manager.shutil.which", lambda command: None)
     ffmpeg = tmp_path / "bin" / "ffmpeg.exe"
     ffmpeg.parent.mkdir()
