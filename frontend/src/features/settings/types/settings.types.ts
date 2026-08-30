@@ -48,3 +48,11 @@ export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type EvolutionSession = z.infer<typeof evolutionSessionSchema>;
 export type DiagnosticReport = z.infer<typeof diagnosticReportSchema>;
 export type SetupReport = z.infer<typeof setupReportSchema>;
+
+export const evolutionLicenseSchema = z.object({
+  status: z.string(),
+  register_url: z.string().nullable().optional(),
+  message: z.string(),
+});
+
+export type EvolutionLicense = z.infer<typeof evolutionLicenseSchema>;

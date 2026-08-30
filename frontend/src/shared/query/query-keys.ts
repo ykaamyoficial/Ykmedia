@@ -24,6 +24,7 @@ export const queryKeys = {
     detail: ["settings", "detail"] as const,
     evolution: ["settings", "evolution"] as const,
     diagnostics: ["settings", "diagnostics"] as const,
+    license: ["settings", "license"] as const,
   },
   conversations: {
     all: ["conversations"] as const,

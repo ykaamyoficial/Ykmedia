@@ -12,6 +12,16 @@ from app.services.configuration_manager import (
 from app.services.diagnostic_service import DiagnosticReport, DiagnosticStatus
 from app.services.environment_manager import EnvironmentCheck, EnvironmentStatus
 from app.services.evolution_client import EvolutionConnectionError, EvolutionHttpError
+from app.services.evolution_license_service import LicenseState, LicenseStatus
+
+
+
+class FakeLicenseService:
+    def __init__(self, status: LicenseStatus) -> None:
+        self._status = status
+
+    def status(self) -> LicenseState:
+        return LicenseState(status=self._status, message=f"licenca {self._status.value}")
 
 
 class FakeEnvironmentManager:
@@ -166,6 +176,7 @@ def test_automatic_setup_orchestrates_all_steps(tmp_path: Path, monkeypatch) -> 
         evolution_provisioning_manager=FakeEvolutionProvisioning(),
         diagnostic_service=FakeDiagnosticService(),
         ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
     ).prepare()
 
     assert report.status is SetupStepStatus.OK
@@ -174,7 +185,49 @@ def test_automatic_setup_orchestrates_all_steps(tmp_path: Path, monkeypatch) -> 
         "directories",
         "environment",
         "backend",
+        "license",
         "evolution",
         "ffmpeg",
         "diagnostic",
     ]
+
+
+def test_setup_stops_before_provisioning_when_license_is_pending(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+    provisioning = FakeEvolutionProvisioning()
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FakeEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=provisioning,
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.PENDING),
+    ).prepare()
+
+    license_step = next(step for step in report.steps if step.key == "license")
+    assert license_step.status is SetupStepStatus.ERROR
+    assert "Ativar licenca" in license_step.message
+    # Sem licenca a Evolution responde 503: nao adianta provisionar.
+    assert "evolution" not in [step.key for step in report.steps]
+    assert report.status is SetupStepStatus.ERROR
+
+
+def test_setup_accepts_versions_without_licensing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FakeEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.NOT_REQUIRED),
+    ).prepare()
+
+    assert next(s for s in report.steps if s.key == "license").status is SetupStepStatus.OK
+    assert "evolution" in [step.key for step in report.steps]
