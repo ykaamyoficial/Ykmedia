@@ -67,7 +67,10 @@ class EvolutionLicenseService:
         if payload is None:
             return LicenseState(
                 status=LicenseStatus.UNAVAILABLE,
-                message="Nao foi possivel falar com a Evolution.",
+                message=(
+                    "Nao foi possivel falar com a Evolution. Verifique se o Docker "
+                    "Desktop esta aberto e use Preparar sistema para subir os servicos."
+                ),
             )
 
         if self._endpoint_missing(payload):
@@ -93,7 +96,10 @@ class EvolutionLicenseService:
         if payload is None:
             return LicenseState(
                 status=LicenseStatus.UNAVAILABLE,
-                message="Nao foi possivel falar com a Evolution.",
+                message=(
+                    "Nao foi possivel falar com a Evolution. Verifique se o Docker "
+                    "Desktop esta aberto e use Preparar sistema para subir os servicos."
+                ),
             )
 
         if self._endpoint_missing(payload):
@@ -123,7 +129,10 @@ class EvolutionLicenseService:
         if payload is None:
             return LicenseState(
                 status=LicenseStatus.UNAVAILABLE,
-                message="Nao foi possivel falar com a Evolution.",
+                message=(
+                    "Nao foi possivel falar com a Evolution. Verifique se o Docker "
+                    "Desktop esta aberto e use Preparar sistema para subir os servicos."
+                ),
             )
 
         if str(payload.get("status", "")).lower() == "active":
