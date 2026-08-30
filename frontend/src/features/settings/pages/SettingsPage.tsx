@@ -25,6 +25,7 @@ import {
   useEvolutionLicense,
   useEvolutionSession,
   useStartEvolutionLicenseRegistration,
+  useWhatsAppPairing,
   usePrepareSystem,
   useRunDiagnostics,
   useSaveSettings,
@@ -96,7 +97,7 @@ export function SettingsPage() {
   const diagnosticsMutation = useRunDiagnostics();
   const [selectedId, setSelectedId] = useState<SettingsSectionId>("system");
   const [draft, setDraft] = useState<AppSettings>(emptySettings);
-  const [qrcodeBase64, setQrcodeBase64] = useState<string | null>(null);
+  const pairing = useWhatsAppPairing();
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -133,19 +134,14 @@ export function SettingsPage() {
   }
 
   function connectWhatsApp() {
-    connectMutation.mutate(undefined, {
-      onSuccess: (session) => {
-        setQrcodeBase64(session.qrcode_base64 ?? null);
-        toast.info("QR Code solicitado.", session.message);
-      },
-      onError: () => toast.error("Nao foi possivel solicitar o QR Code."),
-    });
+    pairing.start();
   }
 
   function disconnectWhatsApp() {
+    pairing.stop();
     disconnectMutation.mutate(undefined, {
       onSuccess: (session) => {
-        setQrcodeBase64(null);
+        void evolutionQuery.refetch();
         toast.info("WhatsApp", session.message);
       },
       onError: () => toast.error("Nao foi possivel desconectar a sessao."),
@@ -196,9 +192,13 @@ export function SettingsPage() {
           <WhatsAppSettingsPanel
             session={evolutionSession}
             loading={actionLoading}
-            qrcodeBase64={qrcodeBase64}
+            pairingPhase={pairing.phase}
+            qrcodeBase64={pairing.qrcodeBase64}
+            secondsLeft={pairing.secondsLeft}
+            pairingError={pairing.errorMessage}
             onRefresh={() => void evolutionQuery.refetch()}
             onConnect={connectWhatsApp}
+            onCancelPairing={pairing.stop}
             onDisconnect={disconnectWhatsApp}
           />
         </div>

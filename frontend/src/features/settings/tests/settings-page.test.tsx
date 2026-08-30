@@ -29,6 +29,18 @@ function mockFetch() {
     if (url.endsWith("/settings") && init?.method === "PUT") {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(settingsPayload) });
     }
+    if (url.endsWith("/settings/evolution/license")) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ status: "ATIVA", register_url: null, message: "Licenca ativa." }),
+      });
+    }
+    if (url.endsWith("/settings/evolution") && init?.method !== "POST") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ instance_name: "ykmedia", state: "close", message: "Desconectado." }),
+      });
+    }
     if (url.endsWith("/settings/evolution/connect")) {
       return Promise.resolve({
         ok: true,
@@ -102,9 +114,22 @@ describe("SettingsPage", () => {
     renderSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "WhatsApp" }));
-    fireEvent.click(screen.getByRole("button", { name: /Conectar WhatsApp/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Conectar WhatsApp/i }));
 
     await waitFor(() => expect(screen.getByAltText("QR Code do WhatsApp")).toBeInTheDocument());
+  });
+
+  it("guides the user through the pairing steps while the QR is on screen", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole("button", { name: "WhatsApp" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Conectar WhatsApp/i }));
+
+    // Sem instrucoes o usuario nao sabe onde achar "Aparelhos conectados".
+    await waitFor(() => expect(screen.getByText(/Aparelhos conectados/i)).toBeInTheDocument());
+    expect(screen.getByText(/renova sozinho/i)).toBeInTheDocument();
   });
 
   it("runs diagnostics and renders the result table", async () => {
