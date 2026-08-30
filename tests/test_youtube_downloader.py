@@ -84,3 +84,25 @@ def test_resolves_merged_mp4_path(tmp_path: Path) -> None:
     )
 
     assert result == merged_path
+
+
+def test_format_caps_resolution_and_falls_back_to_separate_streams() -> None:
+    """Sem limite o yt-dlp escolhe 4K (mais de 1 GB por video).
+
+    O YouTube tambem parou de oferecer formatos com video e audio juntos sem um
+    runtime JavaScript, entao o par separado precisa continuar no fallback.
+    """
+    from app.core.config import settings
+
+    fmt = YoutubeDownloader._VIDEO_WITH_AUDIO_FORMAT
+
+    assert f"height<=?{settings.YOUTUBE_MAX_HEIGHT}" in fmt
+    assert fmt.count(f"height<=?{settings.YOUTUBE_MAX_HEIGHT}") >= 4
+    assert "bestvideo" in fmt and "bestaudio" in fmt
+
+
+def test_download_options_merge_into_mp4() -> None:
+    options = YoutubeDownloader()._build_download_options("saida.%(ext)s")
+
+    assert options["merge_output_format"] == "mp4"
+    assert options["format"] == YoutubeDownloader._VIDEO_WITH_AUDIO_FORMAT

@@ -175,6 +175,24 @@ class ReceiveMediaUseCase:
             command_result=command_result,
             downloaded_media=pipeline_result.downloaded_media,
         ):
+            # Link cujo download falhou: a mensagem continua sendo texto, entao
+            # a conversa nao comeca. Sem este aviso o cliente ficaria no vazio
+            # enquanto o worker tenta de novo em segundo plano.
+            if self._has_pending_link_download(errors):
+                self._record_inbound_message(
+                    message=received_message,
+                    state=None,
+                    media_id=None,
+                    errors=errors,
+                )
+                return ReceiveMediaResult(
+                    received_message=received_message,
+                    stored_file=None,
+                    conversation_state=None,
+                    next_message=WhatsAppMessageCatalog.link_processing(),
+                    errors=errors,
+                )
+
             if self._should_send_usage_info(received_message):
                 self._record_inbound_message(
                     message=received_message,
@@ -523,6 +541,9 @@ class ReceiveMediaUseCase:
                 return f"Arquivo recebido: {message.media.caption}"
 
         return f"Mensagem recebida: {message.message_type.value}"
+
+    def _has_pending_link_download(self, errors: list[str]) -> bool:
+        return any(error.startswith("youtube:") for error in errors)
 
     def _is_silent_conversation_result(
         self,
