@@ -1,4 +1,5 @@
 import { ValidationError } from "@/shared/errors";
+import { appTimeouts } from "@/shared/constants/app";
 import { httpClient } from "@/shared/services";
 import {
   appSettingsSchema,
@@ -72,7 +73,10 @@ export async function disconnectEvolutionSession(): Promise<EvolutionSession> {
 }
 
 export async function prepareSystem(): Promise<SetupReport> {
-  const payload = await httpClient.requestJson<unknown>("/settings/prepare", { method: "POST" });
+  const payload = await httpClient.requestJson<unknown>("/settings/prepare", {
+    method: "POST",
+    timeoutMs: appTimeouts.systemPrepareMs,
+  });
   const parsed = setupReportSchema.safeParse(payload);
   if (!parsed.success) {
     throw new ValidationError("Setup payload is invalid.", parsed.error);

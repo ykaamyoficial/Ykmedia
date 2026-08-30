@@ -12,6 +12,10 @@ export const appRoutes = {
 
 export const appTimeouts = {
   httpRequestMs: 5000,
+  // Preparar o sistema baixa mais de 1 GB de imagens do Docker na primeira
+  // vez. Com o limite padrao a tela desistia em 5 segundos e acusava falha
+  // enquanto o backend seguia trabalhando.
+  systemPrepareMs: 20 * 60 * 1000,
   debounceMs: 300,
   toastMs: 4200,
 } as const;
