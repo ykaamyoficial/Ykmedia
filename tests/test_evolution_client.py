@@ -226,39 +226,6 @@ def test_send_reply_buttons_uses_official_endpoint_and_payload() -> None:
     assert result == {"status": "PENDING"}
 
 
-def test_send_selection_list_uses_official_endpoint_and_payload() -> None:
-    captured_request: dict[str, object] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured_request["method"] = request.method
-        captured_request["url_path"] = request.url.path
-        captured_request["json"] = request.content.decode("utf-8")
-        return httpx.Response(status_code=201, json={"status": "PENDING"}, request=request)
-
-    client = EvolutionClient(
-        base_url="http://evolution.test",
-        timeout_seconds=1.0,
-        transport=httpx.MockTransport(handler),
-    )
-
-    result = asyncio.run(
-        client.send_selection_list(
-            recipient="556299999999@s.whatsapp.net",
-            text="Categorias",
-            button_text="Ver categorias",
-            options=[InteractiveOption(id="category:1", title="Louvores")],
-            footer="YkMedia",
-        )
-    )
-
-    assert captured_request["method"] == "POST"
-    assert captured_request["url_path"] == "/message/sendList/ykmedia"
-    assert '"buttonText":"Ver categorias"' in str(captured_request["json"])
-    assert '"rowId":"category:1"' in str(captured_request["json"])
-    assert '"description"' not in str(captured_request["json"])
-    assert result == {"status": "PENDING"}
-
-
 def test_connect_instance_uses_official_endpoint() -> None:
     captured_request: dict[str, object] = {}
 

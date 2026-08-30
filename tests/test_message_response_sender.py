@@ -27,17 +27,6 @@ class FakeEvolutionClient:
         self.calls.append(("buttons", recipient, text, tuple(option.id for option in options), footer))
         return {"status": "PENDING"}
 
-    async def send_selection_list(
-        self,
-        recipient: str,
-        text: str,
-        button_text: str,
-        options: list[InteractiveOption],
-        footer: str | None = None,
-    ) -> dict[str, object]:
-        self.calls.append(("list", recipient, text, button_text, tuple(option.id for option in options), footer))
-        return {"status": "PENDING"}
-
 
 class FailingEvolutionClient:
     async def send_text_message(self, recipient: str, text: str) -> dict[str, object]:
@@ -45,11 +34,10 @@ class FailingEvolutionClient:
 
 
 class FailingInteractiveEvolutionClient(FakeEvolutionClient):
-    async def send_selection_list(
+    async def send_reply_buttons(
         self,
         recipient: str,
         text: str,
-        button_text: str,
         options: list[InteractiveOption],
         footer: str | None = None,
     ) -> dict[str, object]:
@@ -151,7 +139,7 @@ def test_does_not_send_when_use_case_has_no_message_to_deliver() -> None:
     assert evolution_client.calls == []
 
 
-def test_sends_selection_list_when_prompt_has_up_to_three_options() -> None:
+def test_sends_reply_buttons_when_prompt_has_up_to_three_options() -> None:
     evolution_client = FakeEvolutionClient()
     sender = MessageResponseSender(evolution_client=evolution_client)  # type: ignore[arg-type]
     result = ReceiveMediaResult(
@@ -179,17 +167,16 @@ def test_sends_selection_list_when_prompt_has_up_to_three_options() -> None:
     assert delivery.sent is True
     assert evolution_client.calls == [
         (
-            "list",
+            "buttons",
             "556299999999@s.whatsapp.net",
             "Escolha uma opcao.",
-            "Ver opções",
             ("filename:keep_original", "filename:custom"),
             "YkMedia",
         ),
     ]
 
 
-def test_sends_selection_list_when_prompt_has_more_than_three_options() -> None:
+def test_falls_back_to_text_when_prompt_has_more_than_three_options() -> None:
     evolution_client = FakeEvolutionClient()
     sender = MessageResponseSender(evolution_client=evolution_client)  # type: ignore[arg-type]
     result = ReceiveMediaResult(
@@ -212,9 +199,10 @@ def test_sends_selection_list_when_prompt_has_more_than_three_options() -> None:
 
     delivery = asyncio.run(sender.send_use_case_response(result))
 
+    # O WhatsApp so aceita 3 botoes: menus maiores viram texto numerado.
     assert delivery.sent is True
-    assert evolution_client.calls[0][0] == "list"
-    assert evolution_client.calls[0][4] == ("category:1", "category:2", "category:3", "category:4")
+    assert evolution_client.calls[0][0] == "text"
+    assert evolution_client.calls[0][2] == "Escolha uma categoria."
     assert len(evolution_client.calls) == 1
 
 

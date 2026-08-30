@@ -33,7 +33,10 @@ services:
       retries: 10
 
   evolution:
-    image: evoapicloud/evolution-api:v2.3.7
+    # 2.4.0-rc2 e a primeira versao em que os botoes interativos funcionam:
+    # a v2.3.7 embrulhava a mensagem em viewOnceMessage (o WhatsApp descartava)
+    # e nao injetava o node native_flow. Exige ativacao de licenca (gratuita).
+    image: evoapicloud/evolution-api:2.4.0-rc2
     container_name: ykmedia_evolution
     restart: unless-stopped
     depends_on:
@@ -64,8 +67,8 @@ services:
 
       CONFIG_SESSION_PHONE_NAME: YkMedia
       CONFIG_SESSION_PHONE_CLIENT: YkMedia
-      CONFIG_SESSION_PHONE_VERSION: 2.3000.1043944461
-      WEB_VERSION: 2.3000.1043944461
+      # Sem pin de WEB_VERSION: os botoes so renderizam com a versao do
+      # WhatsApp Web que acompanha a imagem. Fixar uma antiga volta a quebrar.
       LANGUAGE: pt-BR
       TELEMETRY: "false"
 

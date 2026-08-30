@@ -24,6 +24,7 @@ from app.services.download_manager import DownloadManager
 from app.services.diagnostic_service import DiagnosticService
 from app.services.download_query_service import DownloadQueryService
 from app.services.evolution_client import EvolutionClient
+from app.services.evolution_license_service import EvolutionLicenseService
 from app.services.environment_manager import EnvironmentManager
 from app.services.file_query_service import FileQueryService
 from app.services.file_storage import FileStorage
@@ -44,6 +45,11 @@ from app.services.youtube_downloader import YoutubeDownloader
 @lru_cache(maxsize=1)
 def get_evolution_client() -> EvolutionClient:
     return EvolutionClient()
+
+
+@lru_cache(maxsize=1)
+def get_evolution_license_service() -> EvolutionLicenseService:
+    return EvolutionLicenseService()
 
 
 @lru_cache(maxsize=1)

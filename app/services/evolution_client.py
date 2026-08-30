@@ -59,7 +59,12 @@ class EvolutionClient:
 
     async def aclose(self) -> None:
         if self._client is not None and not self._client.is_closed:
-            await self._client.aclose()
+            try:
+                await self._client.aclose()
+            except RuntimeError:
+                # Fechar de um event loop diferente do que criou o client nao
+                # deve derrubar o desligamento da aplicacao.
+                pass
         self._client = None
 
     async def health(self) -> dict[str, Any]:
@@ -113,38 +118,6 @@ class EvolutionClient:
                     }
                     for option in options
                 ],
-            },
-        )
-
-    async def send_selection_list(
-        self,
-        recipient: str,
-        text: str,
-        button_text: str,
-        options: list[InteractiveOption],
-        footer: str | None = None,
-    ) -> dict[str, Any]:
-        normalized_recipient = self._normalize_recipient(recipient)
-        normalized_text = text.strip()
-        normalized_button_text = button_text.strip()
-        if not normalized_recipient:
-            raise EvolutionInvalidResponseError("Cannot send a list without a recipient.")
-        if not normalized_text:
-            raise EvolutionInvalidResponseError("Cannot send a list without text.")
-        if not normalized_button_text:
-            raise EvolutionInvalidResponseError("Cannot send a list without button text.")
-        if not options:
-            raise EvolutionInvalidResponseError("Cannot send an empty list.")
-
-        return await self._request_json(
-            "POST",
-            f"/message/sendList/{settings.EVOLUTION_INSTANCE}",
-            json={
-                "number": normalized_recipient,
-                "title": normalized_text,
-                "footerText": footer or "YkMedia",
-                "buttonText": normalized_button_text,
-                "sections": [{"title": "Opcoes", "rows": [self._list_row(option) for option in options]}],
             },
         )
 
@@ -298,12 +271,3 @@ class EvolutionClient:
             value = value.split("@", 1)[0]
 
         return "".join(character for character in value if character.isdigit())
-
-    def _list_row(self, option: InteractiveOption) -> dict[str, str]:
-        row = {
-            "title": option.title,
-            "rowId": option.id,
-        }
-        if option.description:
-            row["description"] = option.description
-        return row
