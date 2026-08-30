@@ -5,18 +5,27 @@ import { YkSidebarSection } from "@/components/system/YkSidebarSection";
 import { YkStatusBadge } from "@/components/system/YkStatusBadge";
 import { cn } from "@/components/ui/utils";
 import { useApp } from "@/providers/useApp";
-import { useBackendStatus } from "@/providers/useBackendStatus";
+import { useServiceStatus, type ServiceState } from "@/hooks/use-service-status";
 import { navigationItems } from "@/routes/navigation";
 import { YkIcons } from "@/shared/icons";
 
-function statusTone(isOnline: boolean) {
-  return isOnline ? "success" : "danger";
-}
+const TONE_BY_STATE: Record<ServiceState, "success" | "warning" | "danger" | "neutral"> = {
+  online: "success",
+  warning: "warning",
+  offline: "danger",
+  unknown: "neutral",
+};
+
+const LABEL_BY_STATE: Record<ServiceState, string> = {
+  online: "Online",
+  warning: "Conectando",
+  offline: "Offline",
+  unknown: "?",
+};
 
 export function YkSidebar() {
   const { sidebarCompact, toggleSidebar } = useApp();
-  const backend = useBackendStatus();
-  const serviceLabel = backend.isOnline ? "Online" : "Offline";
+  const services = useServiceStatus();
 
   return (
     <nav
@@ -49,9 +58,21 @@ export function YkSidebar() {
       <div className="space-y-3">
         <YkSeparator />
         <div className="space-y-2 rounded-xl border border-border bg-surface p-2">
-          <YkStatusBadge label={`Backend ${serviceLabel}`} tone={statusTone(backend.isOnline)} compact={sidebarCompact} />
-          <YkStatusBadge label={`Evolution ${serviceLabel}`} tone={statusTone(backend.isOnline)} compact={sidebarCompact} />
-          <YkStatusBadge label={`WhatsApp ${serviceLabel}`} tone={statusTone(backend.isOnline)} compact={sidebarCompact} />
+          <YkStatusBadge
+            label={`Backend ${LABEL_BY_STATE[services.backend]}`}
+            tone={TONE_BY_STATE[services.backend]}
+            compact={sidebarCompact}
+          />
+          <YkStatusBadge
+            label={`Evolution ${LABEL_BY_STATE[services.evolution]}`}
+            tone={TONE_BY_STATE[services.evolution]}
+            compact={sidebarCompact}
+          />
+          <YkStatusBadge
+            label={`WhatsApp ${LABEL_BY_STATE[services.whatsapp]}`}
+            tone={TONE_BY_STATE[services.whatsapp]}
+            compact={sidebarCompact}
+          />
         </div>
         <YkButton
           type="button"

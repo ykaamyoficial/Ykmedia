@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -246,11 +247,15 @@ class BackendRuntimeManager:
 
     def _default_process_starter(self) -> BackendProcess:
         command = self._backend_command()
-        return subprocess.Popen(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        options: dict[str, object] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            # Sem isso o Windows abre uma janela de console preta junto do app.
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        return subprocess.Popen(command, **options)
 
     def _backend_command(self) -> list[str]:
         if getattr(sys, "frozen", False):

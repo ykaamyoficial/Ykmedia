@@ -246,7 +246,13 @@ class EvolutionClient:
                 message=f"Evolution API returned HTTP {status_code}.",
             ) from exc
         except httpx.RequestError as exc:
-            raise EvolutionConnectionError("Could not connect to Evolution API.") from exc
+            # Mensagem em portugues e acionavel: ela chega ate a tela de
+            # configuracoes, onde "Could not connect to Evolution API" nao dizia
+            # a quem instala o que conferir.
+            raise EvolutionConnectionError(
+                "Nao foi possivel falar com a Evolution. Verifique se o Docker "
+                "Desktop esta aberto e use Preparar sistema."
+            ) from exc
 
         try:
             payload = response.json()

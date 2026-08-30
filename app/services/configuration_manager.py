@@ -1,3 +1,4 @@
+import os
 import secrets
 import shutil
 import subprocess
@@ -213,6 +214,16 @@ class FfmpegManager:
         if not shutil.which("winget"):
             return FfmpegStatus(False, "", "Instalacao automatica requer winget no Windows.")
 
+        options: dict[str, object] = {
+            "capture_output": True,
+            "text": True,
+            "check": False,
+            "timeout": 900,
+        }
+        if os.name == "nt":
+            # Sem isso o winget abre uma janela de console preta.
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
         self._command_runner(
             [
                 "winget",
@@ -224,10 +235,7 @@ class FfmpegManager:
                 "--accept-source-agreements",
                 "--silent",
             ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=900,
+            **options,
         )
         return self.detect()
 
