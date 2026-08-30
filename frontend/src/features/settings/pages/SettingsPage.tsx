@@ -23,8 +23,8 @@ import {
   useConnectEvolutionSession,
   useDisconnectEvolutionSession,
   useEvolutionLicense,
+  useEvolutionLicenseActivation,
   useEvolutionSession,
-  useStartEvolutionLicenseRegistration,
   useWhatsAppPairing,
   usePrepareSystem,
   useRunDiagnostics,
@@ -89,7 +89,9 @@ export function SettingsPage() {
   const settingsQuery = useSettings();
   const evolutionQuery = useEvolutionSession();
   const licenseQuery = useEvolutionLicense();
-  const startLicenseRegistration = useStartEvolutionLicenseRegistration();
+  const licenseActivation = useEvolutionLicenseActivation(() => {
+    void licenseQuery.refetch();
+  });
   const saveMutation = useSaveSettings();
   const connectMutation = useConnectEvolutionSession();
   const disconnectMutation = useDisconnectEvolutionSession();
@@ -183,10 +185,13 @@ export function SettingsPage() {
         <div className="space-y-4">
           <EvolutionLicensePanel
             license={licenseQuery.data}
-            loading={licenseQuery.isFetching || startLicenseRegistration.isPending}
-            registerUrl={startLicenseRegistration.data?.register_url}
+            loading={licenseQuery.isFetching}
+            activationPhase={licenseActivation.phase}
+            registerUrl={licenseActivation.registerUrl}
+            activationError={licenseActivation.errorMessage}
             onRefresh={() => void licenseQuery.refetch()}
-            onStartRegistration={() => startLicenseRegistration.mutate()}
+            onStartActivation={licenseActivation.start}
+            onCancelActivation={licenseActivation.stop}
             onOpenRegisterUrl={(url) => void openExternalUrl(url)}
           />
           <WhatsAppSettingsPanel
