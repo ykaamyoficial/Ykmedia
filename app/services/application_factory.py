@@ -246,6 +246,7 @@ def get_automatic_setup_service() -> AutomaticSetupService:
         evolution_provisioning_manager=get_evolution_provisioning_manager(),
         diagnostic_service=get_diagnostic_service(),
         ffmpeg_manager=get_ffmpeg_manager(),
+        license_service=get_evolution_license_service(),
     )
 
 

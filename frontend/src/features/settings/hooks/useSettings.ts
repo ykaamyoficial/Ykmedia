@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   connectEvolutionSession,
   disconnectEvolutionSession,
+  fetchEvolutionLicense,
   fetchEvolutionSession,
   fetchSettings,
   prepareSystem,
   runDiagnostics,
   saveSettings,
+  startEvolutionLicenseRegistration,
 } from "@/features/settings/api";
 import { type AppSettings } from "@/features/settings/types";
 import { queryKeys } from "@/shared/query";
@@ -73,4 +75,23 @@ export function usePrepareSystem() {
 
 export function useRunDiagnostics() {
   return useMutation({ mutationFn: runDiagnostics });
+}
+
+export function useEvolutionLicense() {
+  return useQuery({
+    queryKey: queryKeys.settings.license,
+    queryFn: fetchEvolutionLicense,
+    staleTime: 10000,
+  });
+}
+
+export function useStartEvolutionLicenseRegistration() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: startEvolutionLicenseRegistration,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.license });
+    },
+  });
 }

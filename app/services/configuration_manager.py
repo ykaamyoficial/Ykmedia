@@ -5,7 +5,10 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from app.services.evolution_license_service import EvolutionLicenseService
 
 from app.core.config import settings
 from app.services.evolution_client import EvolutionConnectionError, EvolutionHttpError
@@ -298,6 +301,7 @@ class AutomaticSetupService:
         evolution_provisioning_manager: EvolutionProvisioningService,
         diagnostic_service: DiagnosticServiceProtocol,
         ffmpeg_manager: FfmpegManager,
+        license_service: "EvolutionLicenseService | None" = None,
     ) -> None:
         self._configuration_manager = configuration_manager
         self._environment_manager = environment_manager
@@ -305,6 +309,7 @@ class AutomaticSetupService:
         self._evolution_provisioning_manager = evolution_provisioning_manager
         self._diagnostic_service = diagnostic_service
         self._ffmpeg_manager = ffmpeg_manager
+        self._license_service = license_service
 
     def prepare(self) -> SetupReport:
         steps: list[SetupStepResult] = []
@@ -312,12 +317,55 @@ class AutomaticSetupService:
         steps.append(self._configuration_manager.ensure_directories())
         steps.append(self._environment_step())
         steps.append(self._backend_step())
-        steps.append(self._evolution_provisioning_manager.provision())
+        license_step = self._license_step()
+        steps.append(license_step)
+        # Sem licenca a Evolution responde 503 em tudo: provisionar so gastaria
+        # tempo para falhar com uma mensagem confusa.
+        if license_step.status is not SetupStepStatus.ERROR:
+            steps.append(self._evolution_provisioning_manager.provision())
         steps.append(self._ffmpeg_step())
         steps.append(self._diagnostic_step())
         status = self._overall_status(steps)
         message = "Sistema pronto." if status is SetupStepStatus.OK else "Alguns itens ainda precisam de atencao."
         return SetupReport(status=status, steps=steps, message=message)
+
+    def _license_step(self) -> SetupStepResult:
+        from app.services.evolution_license_service import LicenseStatus
+
+        if self._license_service is None:
+            return SetupStepResult(
+                key="license",
+                label="Licenca da Evolution",
+                status=SetupStepStatus.OK,
+                message="Verificacao de licenca desativada.",
+            )
+
+        state = self._license_service.status()
+        if state.status in {LicenseStatus.ACTIVE, LicenseStatus.NOT_REQUIRED}:
+            return SetupStepResult(
+                key="license",
+                label="Licenca da Evolution",
+                status=SetupStepStatus.OK,
+                message=state.message,
+            )
+
+        if state.status is LicenseStatus.UNAVAILABLE:
+            return SetupStepResult(
+                key="license",
+                label="Licenca da Evolution",
+                status=SetupStepStatus.WARNING,
+                message=state.message,
+            )
+
+        return SetupStepResult(
+            key="license",
+            label="Licenca da Evolution",
+            status=SetupStepStatus.ERROR,
+            message=(
+                "A Evolution exige uma ativacao gratuita. Abra Configuracoes e "
+                "clique em Ativar licenca."
+            ),
+        )
 
     def _environment_step(self) -> SetupStepResult:
         check = self._environment_manager.prepare()

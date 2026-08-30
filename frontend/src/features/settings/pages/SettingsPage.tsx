@@ -6,10 +6,12 @@ import { navigationItems } from "@/routes/navigation";
 import { YkErrorState, YkOfflineState, YkSkeleton } from "@/shared/components";
 import { isOfflineError } from "@/shared/errors";
 import { YkIcons } from "@/shared/icons";
+import { openExternalUrl } from "@/shared/services";
 import { toast } from "@/shared/toast";
 import {
   AdvancedSettingsPanel,
   FoldersSettingsPanel,
+  EvolutionLicensePanel,
   SettingsNav,
   type SettingsNavItem,
   type SettingsSectionId,
@@ -20,7 +22,9 @@ import {
 import {
   useConnectEvolutionSession,
   useDisconnectEvolutionSession,
+  useEvolutionLicense,
   useEvolutionSession,
+  useStartEvolutionLicenseRegistration,
   usePrepareSystem,
   useRunDiagnostics,
   useSaveSettings,
@@ -83,6 +87,8 @@ function emptySettings(): AppSettings {
 export function SettingsPage() {
   const settingsQuery = useSettings();
   const evolutionQuery = useEvolutionSession();
+  const licenseQuery = useEvolutionLicense();
+  const startLicenseRegistration = useStartEvolutionLicenseRegistration();
   const saveMutation = useSaveSettings();
   const connectMutation = useConnectEvolutionSession();
   const disconnectMutation = useDisconnectEvolutionSession();
@@ -178,14 +184,24 @@ export function SettingsPage() {
 
     if (selectedId === "whatsapp") {
       return (
-        <WhatsAppSettingsPanel
-          session={evolutionSession}
-          loading={actionLoading}
-          qrcodeBase64={qrcodeBase64}
-          onRefresh={() => void evolutionQuery.refetch()}
-          onConnect={connectWhatsApp}
-          onDisconnect={disconnectWhatsApp}
-        />
+        <div className="space-y-4">
+          <EvolutionLicensePanel
+            license={licenseQuery.data}
+            loading={licenseQuery.isFetching || startLicenseRegistration.isPending}
+            registerUrl={startLicenseRegistration.data?.register_url}
+            onRefresh={() => void licenseQuery.refetch()}
+            onStartRegistration={() => startLicenseRegistration.mutate()}
+            onOpenRegisterUrl={(url) => void openExternalUrl(url)}
+          />
+          <WhatsAppSettingsPanel
+            session={evolutionSession}
+            loading={actionLoading}
+            qrcodeBase64={qrcodeBase64}
+            onRefresh={() => void evolutionQuery.refetch()}
+            onConnect={connectWhatsApp}
+            onDisconnect={disconnectWhatsApp}
+          />
+        </div>
       );
     }
 

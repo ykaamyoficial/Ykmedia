@@ -3,11 +3,13 @@ import { httpClient } from "@/shared/services";
 import {
   appSettingsSchema,
   diagnosticReportSchema,
+  evolutionLicenseSchema,
   evolutionSessionSchema,
   saveAppSettingsSchema,
   setupReportSchema,
   type AppSettings,
   type DiagnosticReport,
+  type EvolutionLicense,
   type EvolutionSession,
   type SetupReport,
 } from "@/features/settings/types";
@@ -83,6 +85,26 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
   const parsed = diagnosticReportSchema.safeParse(payload);
   if (!parsed.success) {
     throw new ValidationError("Diagnostics payload is invalid.", parsed.error);
+  }
+  return parsed.data;
+}
+
+export async function fetchEvolutionLicense(): Promise<EvolutionLicense> {
+  const payload = await httpClient.getJson<unknown>("/settings/evolution/license");
+  const parsed = evolutionLicenseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new ValidationError("License payload is invalid.", parsed.error);
+  }
+  return parsed.data;
+}
+
+export async function startEvolutionLicenseRegistration(): Promise<EvolutionLicense> {
+  const payload = await httpClient.requestJson<unknown>("/settings/evolution/license/register", {
+    method: "POST",
+  });
+  const parsed = evolutionLicenseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new ValidationError("License registration payload is invalid.", parsed.error);
   }
   return parsed.data;
 }
