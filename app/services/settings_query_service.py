@@ -109,12 +109,22 @@ class SettingsQueryService:
                 message=str(exc),
             )
 
+        # /instance/connect nao devolve o estado da sessao, so o QR — sem esta
+        # consulta o app mostrava "Desconhecida" mesmo ja estando conectado.
         return EvolutionSessionResponse(
             instance_name=settings.EVOLUTION_INSTANCE,
-            state=self._extract_connection_state(payload),
+            state=self._current_connection_state(fallback=payload),
             qrcode_base64=self._extract_qrcode_base64(payload),
             message="QR Code solicitado.",
         )
+
+    def _current_connection_state(self, fallback: dict[str, object]) -> str:
+        try:
+            state_payload = asyncio.run(self._evolution_client.get_connection_state())
+        except Exception:
+            return self._extract_connection_state(fallback)
+
+        return self._extract_connection_state(state_payload)
 
     def disconnect_evolution_session(self) -> EvolutionSessionResponse:
         try:
