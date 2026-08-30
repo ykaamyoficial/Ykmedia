@@ -87,3 +87,53 @@ def test_environment_prepare_does_not_recreate_running_containers(tmp_path: Path
     assert result.status is EnvironmentStatus.READY
     assert result.message == "Ambiente ja estava pronto e containers ativos."
     assert not any(command[:2] == ["docker", "compose"] for command in runner.commands)
+
+
+def test_download_timeout_becomes_a_readable_message_instead_of_crashing(tmp_path: Path) -> None:
+    """Era a causa da instalacao travada numa maquina nova.
+
+    Baixar Postgres, Redis e Evolution passa de 1 GB. O timeout antigo de 3
+    minutos estourava, TimeoutExpired nao era capturado, a excecao virava erro
+    500 e os containers ficavam parados em "Created".
+    """
+    def runner(command, **kwargs):
+        if "pull" in command or "up" in command:
+            raise subprocess.TimeoutExpired(cmd=command, timeout=900)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+
+    check = manager.prepare(install_docker=False)
+
+    assert check.status is EnvironmentStatus.ERROR
+    assert "demorou demais" in check.message
+    assert "retoma de onde parou" in check.message
+
+
+def test_images_are_pulled_before_starting_the_containers(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    started = {"value": False}
+
+    def runner(command, **kwargs):
+        calls.append(list(command))
+        if command[:2] == ["docker", "compose"] and "up" in command:
+            started["value"] = True
+        if command[:2] == ["docker", "ps"]:
+            stdout = "ykmedia_evolution\nykmedia_postgres\nykmedia_redis\n" if started["value"] else ""
+        else:
+            stdout = "ok"
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout=stdout, stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+    manager.prepare(install_docker=False)
+
+    compose_actions = [c for c in calls if "compose" in c]
+    pull_index = next((i for i, c in enumerate(compose_actions) if "pull" in c), None)
+    up_index = next((i for i, c in enumerate(compose_actions) if "up" in c), None)
+
+    # O download e a parte demorada: isolar num passo proprio deixa o `up`
+    # rapido e o progresso retomavel.
+    assert pull_index is not None, "faltou o docker compose pull"
+    assert up_index is not None
+    assert pull_index < up_index

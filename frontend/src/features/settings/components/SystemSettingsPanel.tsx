@@ -10,6 +10,7 @@ type SystemSettingsPanelProps = {
   diagnostic?: DiagnosticReport;
   setup?: SetupReport;
   loading?: boolean;
+  preparing?: boolean;
   onPrepare: () => void;
   onDiagnostics: () => void;
 };
@@ -18,11 +19,16 @@ export function SystemSettingsPanel({
   diagnostic,
   setup,
   loading = false,
+  preparing = false,
   onPrepare,
   onDiagnostics,
 }: SystemSettingsPanelProps) {
   const rows = diagnostic?.items ?? [];
-  const summary = diagnostic?.message ?? setup?.message ?? "Clique em Preparar Sistema Automaticamente para verificar e corrigir tudo.";
+  const steps = setup?.steps ?? [];
+  const summary =
+    diagnostic?.message ??
+    setup?.message ??
+    "Clique em Preparar Sistema Automaticamente para verificar e corrigir tudo.";
 
   return (
     <SettingsSection
@@ -32,11 +38,7 @@ export function SystemSettingsPanel({
         <>
           <YkButton type="button" size="sm" disabled={loading} onClick={onPrepare}>
             <YkIcons.Wand2 className="h-4 w-4" aria-hidden="true" />
-            Preparar Sistema Automaticamente
-          </YkButton>
-          <YkButton type="button" variant="secondary" size="sm" disabled={loading}>
-            <YkIcons.CornerDownRight className="h-4 w-4" aria-hidden="true" />
-            Abrir assistente
+            {preparing ? "Preparando..." : "Preparar Sistema Automaticamente"}
           </YkButton>
           <YkButton type="button" variant="secondary" size="sm" disabled={loading} onClick={onDiagnostics}>
             <YkIcons.Search className="h-4 w-4" aria-hidden="true" />
@@ -46,7 +48,43 @@ export function SystemSettingsPanel({
       }
     >
       <div className="space-y-4">
-        <p className="text-sm text-secondary">{summary}</p>
+        {preparing ? (
+          <div className="space-y-1 rounded-xl border border-border bg-background p-3">
+            <p className="text-sm font-medium text-foreground">Preparando o sistema...</p>
+            <p className="text-sm text-secondary">
+              Na primeira vez isso baixa mais de 1&nbsp;GB de componentes e pode levar vários
+              minutos. Pode deixar a janela aberta — se a internet cair, clique de novo que o
+              download continua de onde parou.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-secondary">{summary}</p>
+        )}
+
+        {steps.length > 0 && !preparing ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">Etapas</p>
+            <ul className="space-y-2">
+              {steps.map((step) => (
+                <li
+                  key={step.key}
+                  className="flex flex-col gap-1 rounded-xl border border-border bg-background p-3 sm:flex-row sm:items-start sm:gap-3"
+                >
+                  <div className="shrink-0">
+                    <YkStatusBadge label={step.status} tone={statusTone(step.status)} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">{step.label}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm text-secondary">
+                      {step.message}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {rows.length > 0 ? (
           <YkDataTable
             data={rows}

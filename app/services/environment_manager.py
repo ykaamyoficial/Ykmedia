@@ -121,8 +121,13 @@ class EnvironmentManager:
 
         compose_path = self._prepare_runtime_files()
         try:
+            self._compose_pull(compose_path)
             self._compose_up(compose_path)
-        except subprocess.CalledProcessError as exc:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            # TimeoutExpired nao era capturado aqui: numa instalacao nova o
+            # download das imagens estourava o limite, a excecao subia ate virar
+            # erro 500 e o usuario via apenas "Nao foi possivel preparar o
+            # sistema", com os containers parados em "Created".
             return EnvironmentCheck(
                 status=EnvironmentStatus.ERROR,
                 docker_installed=True,
@@ -142,7 +147,7 @@ class EnvironmentManager:
             containers_running=containers_running,
             message="Ambiente preparado e containers iniciados."
             if containers_running
-            else "Docker Compose executou, mas nem todos os containers ficaram ativos.",
+            else self._stopped_containers_message(compose_path),
         )
 
     def runtime_compose_path(self) -> Path:
@@ -193,21 +198,43 @@ class EnvironmentManager:
 
         return Path(__file__).resolve().parents[2] / "docker" / "docker-compose.yml"
 
+    #: Baixar Postgres, Redis e Evolution passa de 1 GB. Numa instalacao nova,
+    #: com internet modesta, isso leva bem mais que os 3 minutos que o timeout
+    #: antigo permitia — e o compose morria no meio, deixando os containers em
+    #: "Created" sem nunca iniciar.
+    PULL_TIMEOUT_SECONDS = 3600
+    COMPOSE_UP_TIMEOUT_SECONDS = 900
+
+    def _compose_pull(self, compose_path: Path) -> None:
+        """Baixa as imagens antes de subir.
+
+        Separar o download do `up` deixa o passo demorado isolado e retomavel:
+        o Docker nao rebaixa camadas que ja vieram.
+        """
+        self._run(
+            self._compose_command(compose_path, ["pull"]),
+            cwd=compose_path.parent,
+            check=False,
+            timeout=self.PULL_TIMEOUT_SECONDS,
+        )
+
     def _compose_up(self, compose_path: Path) -> None:
         self._run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                str(compose_path),
-                "--project-name",
-                "ykmedia",
-                "up",
-                "-d",
-            ],
+            self._compose_command(compose_path, ["up", "-d"]),
             cwd=compose_path.parent,
-            timeout=180,
+            timeout=self.COMPOSE_UP_TIMEOUT_SECONDS,
         )
+
+    def _compose_command(self, compose_path: Path, action: list[str]) -> list[str]:
+        return [
+            "docker",
+            "compose",
+            "-f",
+            str(compose_path),
+            "--project-name",
+            "ykmedia",
+            *action,
+        ]
 
     def _containers_are_running(self) -> bool:
         result = self._run(
@@ -284,8 +311,34 @@ class EnvironmentManager:
             **options,
         )
 
-    def _format_command_error(self, error: subprocess.CalledProcessError) -> str:
+    def _format_command_error(
+        self,
+        error: subprocess.CalledProcessError | subprocess.TimeoutExpired,
+    ) -> str:
+        if isinstance(error, subprocess.TimeoutExpired):
+            return (
+                "O download dos componentes demorou demais e foi interrompido. "
+                "Verifique a internet e clique novamente: o Docker retoma de onde parou."
+            )
+
         stderr = str(error.stderr or "").strip()
         stdout = str(error.stdout or "").strip()
         detail = stderr or stdout or str(error)
         return f"Falha ao executar Docker Compose: {detail}"
+
+    def _stopped_containers_message(self, compose_path: Path) -> str:
+        """Diz qual container ficou parado e por que, em vez de so falhar."""
+        result = self._run(
+            self._compose_command(compose_path, ["ps", "--all", "--format", "{{.Name}} {{.Status}}"]),
+            cwd=compose_path.parent,
+            check=False,
+            timeout=30,
+        )
+        detail = str(getattr(result, "stdout", "") or "").strip()
+        if not detail:
+            return "Docker Compose executou, mas nem todos os containers ficaram ativos."
+
+        return (
+            "Docker Compose executou, mas nem todos os containers ficaram ativos:\n"
+            f"{detail}"
+        )

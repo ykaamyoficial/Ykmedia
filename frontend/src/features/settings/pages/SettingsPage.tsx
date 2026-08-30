@@ -153,7 +153,11 @@ export function SettingsPage() {
   function prepareSystemAction() {
     prepareMutation.mutate(undefined, {
       onSuccess: (report) => toast.info("Sistema", report.message),
-      onError: () => toast.error("Nao foi possivel preparar o sistema."),
+      onError: () =>
+        toast.error(
+          "Nao foi possivel preparar o sistema.",
+          "Confira se o Docker Desktop esta aberto e tente de novo.",
+        ),
     });
   }
 
@@ -229,6 +233,7 @@ export function SettingsPage() {
         diagnostic={diagnosticsMutation.data}
         setup={prepareMutation.data}
         loading={actionLoading}
+        preparing={prepareMutation.isPending}
         onPrepare={prepareSystemAction}
         onDiagnostics={runDiagnosticsAction}
       />

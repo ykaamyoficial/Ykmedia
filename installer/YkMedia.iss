@@ -1,5 +1,5 @@
 #define AppName "YkMedia"
-#define AppVersion "0.3.6"
+#define AppVersion "0.4.0"
 #define AppPublisher "YkMedia"
 
 [Setup]

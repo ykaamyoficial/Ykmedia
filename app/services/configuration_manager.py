@@ -1,8 +1,10 @@
+import logging
 import os
 import secrets
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -15,6 +17,8 @@ from app.core.config import settings
 from app.services.evolution_client import EvolutionConnectionError, EvolutionHttpError
 from app.services.diagnostic_service import DiagnosticReport, DiagnosticStatus
 from app.services.environment_manager import EnvironmentCheck, EnvironmentStatus
+
+logger = logging.getLogger(__name__)
 
 
 class SetupStepStatus(StrEnum):
@@ -321,21 +325,46 @@ class AutomaticSetupService:
 
     def prepare(self) -> SetupReport:
         steps: list[SetupStepResult] = []
-        steps.append(self._configuration_manager.ensure_defaults())
-        steps.append(self._configuration_manager.ensure_directories())
-        steps.append(self._environment_step())
-        steps.append(self._backend_step())
-        license_step = self._license_step()
+        steps.append(self._safe_step("config", "Configuracao", self._configuration_manager.ensure_defaults))
+        steps.append(self._safe_step("directories", "Pastas", self._configuration_manager.ensure_directories))
+        steps.append(self._safe_step("environment", "Ambiente", self._environment_step))
+        steps.append(self._safe_step("backend", "Backend", self._backend_step))
+        license_step = self._safe_step("license", "Licenca da Evolution", self._license_step)
         steps.append(license_step)
         # Sem licenca a Evolution responde 503 em tudo: provisionar so gastaria
         # tempo para falhar com uma mensagem confusa.
         if license_step.status is not SetupStepStatus.ERROR:
-            steps.append(self._evolution_provisioning_manager.provision())
-        steps.append(self._ffmpeg_step())
-        steps.append(self._diagnostic_step())
+            steps.append(
+                self._safe_step("evolution", "Evolution", self._evolution_provisioning_manager.provision)
+            )
+        steps.append(self._safe_step("ffmpeg", "FFmpeg", self._ffmpeg_step))
+        steps.append(self._safe_step("diagnostic", "Diagnostico", self._diagnostic_step))
         status = self._overall_status(steps)
         message = "Sistema pronto." if status is SetupStepStatus.OK else "Alguns itens ainda precisam de atencao."
         return SetupReport(status=status, steps=steps, message=message)
+
+    def _safe_step(
+        self,
+        key: str,
+        label: str,
+        run: Callable[[], SetupStepResult],
+    ) -> SetupStepResult:
+        """Nenhum passo pode derrubar o preparo inteiro.
+
+        Antes, uma excecao inesperada (o timeout do download das imagens, por
+        exemplo) subia ate virar erro 500 e o usuario via so "Nao foi possivel
+        preparar o sistema", sem saber o que aconteceu nem em qual etapa.
+        """
+        try:
+            return run()
+        except Exception as exc:  # noqa: BLE001 - o relatorio precisa continuar
+            logger.exception("Falha no passo '%s' do preparo automatico", key)
+            return SetupStepResult(
+                key=key,
+                label=label,
+                status=SetupStepStatus.ERROR,
+                message=f"{type(exc).__name__}: {exc}",
+            )
 
     def _license_step(self) -> SetupStepResult:
         from app.services.evolution_license_service import LicenseStatus
