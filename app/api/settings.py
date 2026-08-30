@@ -3,11 +3,16 @@ from fastapi import APIRouter, Depends
 from app.models.settings import (
     AppSettingsResponse,
     DiagnosticReportResponse,
+    EvolutionLicenseResponse,
     EvolutionSessionResponse,
     SaveAppSettingsRequest,
     SetupReportResponse,
 )
-from app.services.application_factory import get_settings_query_service
+from app.services.application_factory import (
+    get_evolution_license_service,
+    get_settings_query_service,
+)
+from app.services.evolution_license_service import EvolutionLicenseService
 from app.services.settings_query_service import SettingsQueryService
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -57,3 +62,23 @@ def run_diagnostics(
     service: SettingsQueryService = Depends(get_settings_query_service),
 ) -> DiagnosticReportResponse:
     return service.run_diagnostics()
+
+
+@router.get("/evolution/license", response_model=EvolutionLicenseResponse)
+def get_evolution_license(
+    service: EvolutionLicenseService = Depends(get_evolution_license_service),
+) -> EvolutionLicenseResponse:
+    state = service.status()
+    return EvolutionLicenseResponse(status=state.status.value, message=state.message)
+
+
+@router.post("/evolution/license/register", response_model=EvolutionLicenseResponse)
+def start_evolution_license_registration(
+    service: EvolutionLicenseService = Depends(get_evolution_license_service),
+) -> EvolutionLicenseResponse:
+    state = service.start_registration()
+    return EvolutionLicenseResponse(
+        status=state.status.value,
+        register_url=state.register_url,
+        message=state.message,
+    )

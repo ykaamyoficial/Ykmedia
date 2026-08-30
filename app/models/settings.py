@@ -48,3 +48,9 @@ class SetupReportResponse(BaseModel):
     status: str
     message: str
     steps: list[SetupStepResponse]
+
+
+class EvolutionLicenseResponse(BaseModel):
+    status: str
+    register_url: str | None = None
+    message: str = ""

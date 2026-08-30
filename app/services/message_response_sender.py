@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import logging
 from uuid import uuid4
 
+from app.models.interactive import InteractivePrompt
 from app.models.persistence import (
     ConversationMessageDirection,
     ConversationMessageRecord,
@@ -10,7 +11,6 @@ from app.models.persistence import (
 )
 from app.repositories.conversation_message_repository import ConversationMessageRepository
 from app.services.evolution_client import EvolutionClient, EvolutionClientError
-from app.services.message_catalog import WhatsAppMessageCatalog
 from app.services.receive_media_use_case import ReceiveMediaResult
 
 logger = logging.getLogger(__name__)
@@ -47,33 +47,39 @@ class MessageResponseSender:
         self._record_outbound_message(result, ConversationMessageStatus.SENT)
         return MessageDeliveryResult(sent=True)
 
+    #: O WhatsApp aceita no maximo 3 botoes de resposta rapida. Menus maiores
+    #: (categorias) continuam como texto numerado.
+    MAX_REPLY_BUTTONS = 3
+
     async def _send_response(self, result: ReceiveMediaResult) -> None:
         if result.received_message is None or not result.next_message:
             return
 
         recipient = result.received_message.sender.remote_jid
         prompt = result.interactive_prompt
-        if prompt is None or not prompt.options:
+        if prompt is None or not self._fits_in_buttons(prompt):
             await self._evolution_client.send_text_message(recipient=recipient, text=result.next_message)
             return
 
         try:
-            await self._evolution_client.send_selection_list(
+            await self._evolution_client.send_reply_buttons(
                 recipient=recipient,
                 text=prompt.text,
-                button_text=prompt.button_text or WhatsAppMessageCatalog.options_button_text(),
                 options=prompt.options,
                 footer=prompt.footer,
             )
         except EvolutionClientError as exc:
             logger.warning(
-                "Falha ao enviar mensagem interativa. Enviando menu em texto. erro=%s",
+                "Falha ao enviar botoes. Enviando menu em texto. erro=%s",
                 exc,
             )
             await self._evolution_client.send_text_message(
                 recipient=recipient,
                 text=result.next_message,
             )
+
+    def _fits_in_buttons(self, prompt: InteractivePrompt) -> bool:
+        return bool(prompt.options) and len(prompt.options) <= self.MAX_REPLY_BUTTONS
 
     def _record_outbound_message(
         self,
