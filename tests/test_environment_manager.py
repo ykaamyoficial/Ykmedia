@@ -137,3 +137,33 @@ def test_images_are_pulled_before_starting_the_containers(tmp_path: Path) -> Non
     assert pull_index is not None, "faltou o docker compose pull"
     assert up_index is not None
     assert pull_index < up_index
+
+
+def test_containers_get_time_to_finish_starting(tmp_path: Path, monkeypatch) -> None:
+    """`compose up -d` retorna antes dos containers estarem de pe.
+
+    Numa maquina mais lenta a Evolution ainda aparecia como "Created" na hora em
+    que checavamos, e o preparo declarava ERRO num ambiente que ficaria pronto
+    poucos segundos depois.
+    """
+    monkeypatch.setattr("app.services.environment_manager.time.sleep", lambda _: None)
+    checks = {"count": 0}
+
+    def runner(command, **kwargs):
+        if command[:2] == ["docker", "ps"]:
+            checks["count"] += 1
+            # So na terceira consulta os tres containers aparecem rodando.
+            stdout = (
+                "ykmedia_evolution\nykmedia_postgres\nykmedia_redis\n"
+                if checks["count"] >= 3
+                else "ykmedia_postgres\n"
+            )
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+
+    check = manager.prepare(install_docker=False)
+
+    assert check.status is EnvironmentStatus.READY
+    assert check.containers_running is True

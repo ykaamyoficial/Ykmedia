@@ -96,7 +96,9 @@ class EnvironmentManager:
 
         if not self._docker_is_running():
             self._start_docker_desktop()
-            self._wait_for_docker(timeout_seconds=90)
+            # O Docker Desktop leva de 2 a 4 minutos num arranque frio; 90s
+            # desistia antes da hora e o preparo parava no primeiro passo.
+            self._wait_for_docker(timeout_seconds=240)
 
         if not self._docker_is_running():
             return EnvironmentCheck(
@@ -137,7 +139,7 @@ class EnvironmentManager:
                 message=self._format_command_error(exc),
             )
 
-        containers_running = self._containers_are_running()
+        containers_running = self._wait_for_containers(self.CONTAINER_STARTUP_TIMEOUT_SECONDS)
 
         return EnvironmentCheck(
             status=EnvironmentStatus.READY if containers_running else EnvironmentStatus.ERROR,
@@ -235,6 +237,21 @@ class EnvironmentManager:
             "ykmedia",
             *action,
         ]
+
+    #: `compose up -d` devolve o controle assim que os containers sao criados,
+    #: nao quando sobem. Postgres e Redis precisam inicializar o volume e a
+    #: Evolution roda as migracoes: numa maquina modesta isso passa de um minuto.
+    CONTAINER_STARTUP_TIMEOUT_SECONDS = 180
+    CONTAINER_POLL_SECONDS = 3
+
+    def _wait_for_containers(self, timeout_seconds: int) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if self._containers_are_running():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(self.CONTAINER_POLL_SECONDS)
 
     def _containers_are_running(self) -> bool:
         result = self._run(
