@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "YkMedia"
-    APP_VERSION: str = "0.2.0"
+    APP_VERSION: str = "0.3.0"
 
     ENVIRONMENT: str = "development"
     WEBHOOK_SECRET: str = ""
