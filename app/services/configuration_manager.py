@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import secrets
@@ -7,6 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -308,6 +310,15 @@ class EvolutionProvisioningManager:
         return attempt < self._readiness_attempts
 
 
+@dataclass(frozen=True, slots=True)
+class _StepSpec:
+    key: str
+    label: str
+    run: Callable[[], SetupStepResult]
+    #: Etapas cuja falha torna esta inutil de executar.
+    depends_on: tuple[str, ...] = ()
+
+
 class AutomaticSetupService:
     def __init__(
         self,
@@ -318,6 +329,7 @@ class AutomaticSetupService:
         diagnostic_service: DiagnosticServiceProtocol,
         ffmpeg_manager: FfmpegManager,
         license_service: "EvolutionLicenseService | None" = None,
+        runtime_root: str | Path | None = None,
     ) -> None:
         self._configuration_manager = configuration_manager
         self._environment_manager = environment_manager
@@ -326,41 +338,117 @@ class AutomaticSetupService:
         self._diagnostic_service = diagnostic_service
         self._ffmpeg_manager = ffmpeg_manager
         self._license_service = license_service
+        self._runtime_root = runtime_root or os.environ.get("YKMEDIA_RUNTIME_ROOT")
+
+    def _step_plan(self) -> list["_StepSpec"]:
+        """Cada etapa declara de que depende.
+
+        Antes, so a Licenca sabia esperar o Ambiente, e isso estava escrito a
+        mao. Com a regra explicita, uma causa unica produz um unico item
+        vermelho: as etapas que dependem dela ficam Aguardando em vez de repetir
+        o mesmo erro com outras palavras.
+        """
+        return [
+            _StepSpec("config", "Configuracao", self._configuration_manager.ensure_defaults),
+            _StepSpec("directories", "Pastas", self._configuration_manager.ensure_directories),
+            _StepSpec("environment", "Ambiente", self._environment_step),
+            _StepSpec("backend", "Backend", self._backend_step),
+            _StepSpec("license", "Licenca da Evolution", self._license_step, depends_on=("environment",)),
+            # Sem licenca a Evolution responde 503 em tudo: provisionar so
+            # gastaria tempo para falhar com uma mensagem confusa.
+            _StepSpec(
+                "evolution",
+                "Evolution",
+                self._evolution_provisioning_manager.provision,
+                depends_on=("environment", "license"),
+            ),
+            # O FFmpeg nao depende do Docker: bloquea-lo esconderia informacao.
+            _StepSpec("ffmpeg", "FFmpeg", self._ffmpeg_step),
+            _StepSpec(
+                "diagnostic",
+                "Diagnostico",
+                self._diagnostic_step,
+                depends_on=("environment", "license", "evolution"),
+            ),
+        ]
 
     def prepare(self) -> SetupReport:
         steps: list[SetupStepResult] = []
-        steps.append(self._safe_step("config", "Configuracao", self._configuration_manager.ensure_defaults))
-        steps.append(self._safe_step("directories", "Pastas", self._configuration_manager.ensure_directories))
-        environment_step = self._safe_step("environment", "Ambiente", self._environment_step)
-        steps.append(environment_step)
-        steps.append(self._safe_step("backend", "Backend", self._backend_step))
+        done: dict[str, SetupStepResult] = {}
 
-        # Sem containers, licenca e Evolution so repetem a mesma causa com outras
-        # palavras. A tela mostrava tres erros para um problema so, escondendo
-        # qual deles precisava de acao.
-        if environment_step.status is SetupStepStatus.ERROR:
-            steps.append(
-                SetupStepResult(
-                    "license",
-                    "Licenca da Evolution",
+        for spec in self._step_plan():
+            blocker = self._blocking_dependency(spec, done)
+            if blocker is not None:
+                # Nao executamos, mas tambem nao escondemos: a etapa aparece
+                # aguardando, apontando para o que precisa ser resolvido antes.
+                result = SetupStepResult(
+                    spec.key,
+                    spec.label,
                     SetupStepStatus.PENDING,
-                    "Aguardando os containers subirem — resolva a etapa Ambiente primeiro.",
+                    f"Aguardando a etapa {blocker.label} ser resolvida primeiro.",
                 )
-            )
-        else:
-            license_step = self._safe_step("license", "Licenca da Evolution", self._license_step)
-            steps.append(license_step)
-            # Sem licenca a Evolution responde 503 em tudo: provisionar so gastaria
-            # tempo para falhar com uma mensagem confusa.
-            if license_step.status is not SetupStepStatus.ERROR:
-                steps.append(
-                    self._safe_step("evolution", "Evolution", self._evolution_provisioning_manager.provision)
-                )
-        steps.append(self._safe_step("ffmpeg", "FFmpeg", self._ffmpeg_step))
-        steps.append(self._safe_step("diagnostic", "Diagnostico", self._diagnostic_step))
+            else:
+                result = self._safe_step(spec.key, spec.label, spec.run)
+
+            done[spec.key] = result
+            steps.append(result)
+
         status = self._overall_status(steps)
         message = "Sistema pronto." if status is SetupStepStatus.OK else "Alguns itens ainda precisam de atencao."
-        return SetupReport(status=status, steps=steps, message=message)
+        report = SetupReport(status=status, steps=steps, message=message)
+        self._persist(report)
+        return report
+
+    def _blocking_dependency(
+        self,
+        spec: "_StepSpec",
+        done: dict[str, SetupStepResult],
+    ) -> SetupStepResult | None:
+        for key in spec.depends_on:
+            dependency = done.get(key)
+            if dependency is None:
+                continue
+            # WARNING tambem bloqueia: "nao consegui falar com a Evolution"
+            # significa que os passos seguintes falhariam pela mesma causa,
+            # produzindo um segundo vermelho para um problema so.
+            if dependency.status is not SetupStepStatus.OK:
+                return dependency
+        return None
+
+    def _persist(self, report: SetupReport) -> None:
+        """Grava o relatorio para que ele sobreviva ao fechamento da janela.
+
+        Ate aqui o relatorio so existia enquanto a tela estivesse aberta: se o
+        app fechasse, a unica pista do que falhou era a lembranca do usuario.
+        """
+        if self._runtime_root is None:
+            return
+
+        try:
+            log_directory = Path(self._runtime_root) / "logs"
+            log_directory.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "gerado_em": datetime.now(UTC).isoformat(timespec="seconds"),
+                "status": report.status.value,
+                "message": report.message,
+                "steps": [
+                    {
+                        "key": step.key,
+                        "label": step.label,
+                        "status": step.status.value,
+                        "message": step.message,
+                        "detail": step.detail,
+                        "action": step.action,
+                    }
+                    for step in report.steps
+                ],
+            }
+            (log_directory / "setup-report.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            # Nao poder gravar o relatorio nao pode derrubar o preparo.
+            logger.warning("Nao foi possivel gravar o relatorio do preparo", exc_info=True)
 
     def _safe_step(
         self,

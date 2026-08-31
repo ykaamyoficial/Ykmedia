@@ -472,3 +472,27 @@ def test_health_raises_standardized_unsupported_json_error() -> None:
 
     with pytest.raises(EvolutionInvalidResponseError):
         asyncio.run(client.health())
+
+
+def test_base_url_follows_a_port_change_without_restarting(monkeypatch) -> None:
+    """O preparo pode trocar a porta da Evolution enquanto o app roda.
+
+    O cliente e criado uma vez (lru_cache) e congelava a URL na construcao:
+    depois da troca de porta ele seguia batendo na 8080 e a interface inteira
+    acusava "offline" ate o usuario reiniciar o programa.
+    """
+    monkeypatch.setattr(settings, "EVOLUTION_BASE_URL", "http://localhost:8080")
+    client = EvolutionClient()
+    assert client.base_url == "http://localhost:8080"
+
+    monkeypatch.setattr(settings, "EVOLUTION_BASE_URL", "http://localhost:8090")
+
+    assert client.base_url == "http://localhost:8090"
+
+
+def test_an_explicit_base_url_is_not_overridden(monkeypatch) -> None:
+    """Quem passa a URL na mao manda: usado em testes e integracoes."""
+    client = EvolutionClient(base_url="http://exemplo:9999")
+    monkeypatch.setattr(settings, "EVOLUTION_BASE_URL", "http://localhost:8090")
+
+    assert client.base_url == "http://exemplo:9999"

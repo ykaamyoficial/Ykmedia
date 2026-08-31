@@ -280,3 +280,85 @@ def test_the_chosen_port_survives_a_restart(tmp_path: Path) -> None:
 
     assert settings.EVOLUTION_PORT == 8090
     assert settings.EVOLUTION_BASE_URL == "http://localhost:8090"
+
+
+COMPOSE_PS_JSON = (
+    '{"Name":"ykmedia_postgres","Service":"postgres","State":"running","Health":"healthy","ExitCode":0}\n'
+    '{"Name":"ykmedia_redis","Service":"redis","State":"running","Health":"healthy","ExitCode":0}\n'
+    '{"Name":"ykmedia_evolution","Service":"evolution","State":"exited","Health":"","ExitCode":1}\n'
+)
+
+
+def test_partial_success_is_reported_per_container(tmp_path: Path, monkeypatch) -> None:
+    """Na maquina do usuario, postgres e redis subiram saudaveis e so a
+    Evolution falhou. A tela dizia apenas "Ambiente: ERROR", como se nada
+    tivesse funcionado."""
+    monkeypatch.setattr(EnvironmentManager, "CONTAINER_STARTUP_TIMEOUT_SECONDS", 0)
+
+    def runner(command, **kwargs):
+        if command[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+        if "ps" in command and "--format" in command:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=COMPOSE_PS_JSON, stderr="")
+        if "logs" in command:
+            return subprocess.CompletedProcess(
+                args=command, returncode=0, stdout="FATAL: senha do banco recusada", stderr=""
+            )
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+
+    check = manager.prepare(install_docker=False)
+
+    assert check.status is EnvironmentStatus.ERROR
+    assert "2 de 3" in check.message
+    assert "ykmedia_evolution" in check.message
+    # O log do container que falhou e a informacao mais util para o suporte.
+    assert "senha do banco recusada" in check.detail
+
+
+def test_only_the_failing_container_has_its_log_read(tmp_path: Path, monkeypatch) -> None:
+    """Puxar o log dos tres seria lento e enterraria o que importa."""
+    monkeypatch.setattr(EnvironmentManager, "CONTAINER_STARTUP_TIMEOUT_SECONDS", 0)
+    log_targets: list[str] = []
+
+    def runner(command, **kwargs):
+        if "logs" in command:
+            log_targets.append(command[-1])
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="erro", stderr="")
+        if command[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+        if "ps" in command and "--format" in command:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=COMPOSE_PS_JSON, stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+    manager.prepare(install_docker=False)
+
+    assert log_targets == ["evolution"]
+
+
+def test_ansi_colours_are_stripped_from_container_logs(tmp_path: Path, monkeypatch) -> None:
+    """A Evolution escreve o log colorido.
+
+    Os codigos ANSI viram lixo ilegivel na tela ("[1m[37m[Evolution API]").
+    So apareceu ao rodar contra o Docker de verdade.
+    """
+    monkeypatch.setattr(EnvironmentManager, "CONTAINER_STARTUP_TIMEOUT_SECONDS", 0)
+    coloured = "\x1b[1m\x1b[37m[Evolution API]\x1b[0m iniciando"
+
+    def runner(command, **kwargs):
+        if "logs" in command:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=coloured, stderr="")
+        if command[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+        if "ps" in command and "--format" in command:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=COMPOSE_PS_JSON, stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+
+    check = manager.prepare(install_docker=False)
+
+    assert "[Evolution API] iniciando" in check.detail
+    assert "\x1b[" not in check.detail

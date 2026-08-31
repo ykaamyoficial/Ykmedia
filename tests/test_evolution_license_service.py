@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from app.core.config import settings
 from app.services.evolution_license_service import EvolutionLicenseService, LicenseStatus
 
 
@@ -110,3 +111,18 @@ def test_unexpected_payloads_do_not_crash(monkeypatch, payload) -> None:
     )
 
     assert service.status().status is LicenseStatus.UNAVAILABLE
+
+
+def test_license_service_base_url_follows_a_port_change(monkeypatch) -> None:
+    """Mesmo defeito do EvolutionClient, num servico separado.
+
+    O servico e criado uma vez (lru_cache) e congelava a URL: apos o preparo
+    trocar a porta, a licenca seguia sendo consultada na porta antiga e o
+    preparo acusava "nao foi possivel falar com a Evolution".
+    """
+    monkeypatch.setattr(settings, "EVOLUTION_BASE_URL", "http://localhost:8080")
+    service = EvolutionLicenseService()
+
+    monkeypatch.setattr(settings, "EVOLUTION_BASE_URL", "http://localhost:8090")
+
+    assert service.base_url == "http://localhost:8090"

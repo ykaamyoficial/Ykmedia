@@ -54,9 +54,16 @@ class EvolutionLicenseService:
         api_key: str | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
-        self._base_url = (base_url or settings.EVOLUTION_BASE_URL).rstrip("/")
+        self._explicit_base_url = base_url.rstrip("/") if base_url else None
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
+
+    @property
+    def base_url(self) -> str:
+        """Lida a cada uso: o preparo pode trocar a porta com o app rodando."""
+        if self._explicit_base_url is not None:
+            return self._explicit_base_url
+        return settings.EVOLUTION_BASE_URL.rstrip("/")
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -145,12 +152,12 @@ class EvolutionLicenseService:
         )
 
     def _default_redirect_uri(self) -> str:
-        return f"{self._base_url}/license/activate"
+        return f"{self.base_url}/license/activate"
 
     def _get(self, path: str) -> dict[str, Any] | None:
         try:
             response = httpx.get(
-                f"{self._base_url}{path}",
+                f"{self.base_url}{path}",
                 headers=self._headers,
                 timeout=self._timeout_seconds,
             )
