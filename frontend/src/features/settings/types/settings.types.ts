@@ -38,8 +38,8 @@ export const setupStepSchema = z.object({
   message: z.string(),
   // `message` e a manchete; `detail` traz o log tecnico do Docker e `action`
   // diz o que fazer. Opcionais para nao quebrar com um backend mais antigo.
-  detail: z.string().optional().default(""),
-  action: z.string().optional().default(""),
+  detail: z.string().optional(),
+  action: z.string().optional(),
 });
 
 export const setupReportSchema = z.object({

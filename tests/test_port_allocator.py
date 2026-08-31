@@ -31,7 +31,7 @@ def _runner(stdout: str = NETSH_OUTPUT, returncode: int = 0):
 
 
 def test_reserved_windows_range_is_detected() -> None:
-    allocator = PortAllocator(command_runner=_runner())
+    allocator = PortAllocator(is_windows=True, command_runner=_runner())
 
     assert allocator.is_reserved(8080) is True
     assert allocator.is_reserved(8090) is False
@@ -41,13 +41,13 @@ def test_reserved_windows_range_is_detected() -> None:
 def test_preferred_port_is_kept_when_it_works() -> None:
     """Quem ja funciona nao pode ter a porta trocada: o pareamento do WhatsApp
     e a URL da Evolution dependem dela."""
-    allocator = PortAllocator(command_runner=_runner(stdout=""), binder=lambda port: True)
+    allocator = PortAllocator(is_windows=True, command_runner=_runner(stdout=""), binder=lambda port: True)
 
     assert allocator.allocate(preferred=8080) == 8080
 
 
 def test_falls_back_when_the_preferred_port_is_reserved() -> None:
-    allocator = PortAllocator(command_runner=_runner(), binder=lambda port: True)
+    allocator = PortAllocator(is_windows=True, command_runner=_runner(), binder=lambda port: True)
 
     port = allocator.allocate(preferred=8080)
 
@@ -74,6 +74,6 @@ def test_missing_netsh_does_not_break_the_allocation() -> None:
     def failing_runner(command, **kwargs):
         raise FileNotFoundError("netsh")
 
-    allocator = PortAllocator(command_runner=failing_runner, binder=lambda port: True)
+    allocator = PortAllocator(is_windows=True, command_runner=failing_runner, binder=lambda port: True)
 
     assert allocator.allocate(preferred=8080) == 8080

@@ -26,9 +26,13 @@ class PortAllocator:
         self,
         command_runner=subprocess.run,
         binder=None,
+        #: Injetavel para que o comportamento no Windows possa ser testado na
+        #: integracao continua, que roda em Linux.
+        is_windows: bool | None = None,
     ) -> None:
         self.command_runner = command_runner
         self._binder = binder or self._can_bind
+        self._is_windows = os.name == "nt" if is_windows is None else is_windows
         self._reserved_ranges: list[tuple[int, int]] | None = None
 
     def allocate(self, preferred: int | None = None) -> int:
@@ -58,7 +62,7 @@ class PortAllocator:
         return self._reserved_ranges
 
     def _read_excluded_ranges(self) -> list[tuple[int, int]]:
-        if os.name != "nt":
+        if not self._is_windows:
             return []
 
         try:
