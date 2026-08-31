@@ -3,6 +3,7 @@ export type {
   DiagnosticReport,
   EvolutionLicense,
   EvolutionSession,
+  SetupProgress,
   SetupReport,
 } from "@/features/settings/types/settings.types";
 export {
@@ -11,5 +12,6 @@ export {
   evolutionLicenseSchema,
   evolutionSessionSchema,
   saveAppSettingsSchema,
+  setupProgressSchema,
   setupReportSchema,
 } from "@/features/settings/types/settings.types";

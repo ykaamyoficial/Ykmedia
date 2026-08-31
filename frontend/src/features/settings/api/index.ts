@@ -4,6 +4,7 @@ export {
   fetchEvolutionLicense,
   fetchEvolutionSession,
   fetchSettings,
+  fetchSetupProgress,
   prepareSystem,
   runDiagnostics,
   saveSettings,

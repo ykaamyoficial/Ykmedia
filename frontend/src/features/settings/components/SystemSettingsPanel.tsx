@@ -6,6 +6,7 @@ import { YkDataTable } from "@/shared/tables";
 import { YkIcons } from "@/shared/icons";
 import {
   type DiagnosticReport,
+  type SetupProgress,
   type SetupReport,
 } from "@/features/settings/types";
 import { statusLabel, statusTone } from "@/features/settings/utils";
@@ -36,6 +37,8 @@ function TechnicalDetail({ detail }: { detail: string }) {
 type SystemSettingsPanelProps = {
   diagnostic?: DiagnosticReport;
   setup?: SetupReport;
+  /** Andamento do preparo em curso, consultado enquanto o POST nao responde. */
+  progress?: SetupProgress;
   loading?: boolean;
   preparing?: boolean;
   onPrepare: () => void;
@@ -45,6 +48,7 @@ type SystemSettingsPanelProps = {
 export function SystemSettingsPanel({
   diagnostic,
   setup,
+  progress,
   loading = false,
   preparing = false,
   onPrepare,
@@ -52,7 +56,9 @@ export function SystemSettingsPanel({
 }: SystemSettingsPanelProps) {
   const [copied, setCopied] = useState(false);
   const rows = diagnostic?.items ?? [];
-  const steps = setup?.steps ?? [];
+  // Durante o preparo as etapas vem do progresso ao vivo; depois, do relatorio
+  // final devolvido pelo POST.
+  const steps: SetupReport["steps"] = (preparing ? progress?.steps : setup?.steps) ?? [];
   const hasProblem = steps.some(
     (step) => step.status === "ERROR" || step.status === "WARNING",
   );
@@ -157,7 +163,7 @@ export function SystemSettingsPanel({
           </div>
         ) : null}
 
-        {steps.length > 0 && !preparing ? (
+        {steps.length > 0 ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-medium text-foreground">Etapas</p>

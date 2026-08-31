@@ -5,3 +5,4 @@ export { SettingsNav, type SettingsNavItem, type SettingsSectionId } from "@/fea
 export { SimpleSettingsPanel } from "@/features/settings/components/SimpleSettingsPanel";
 export { SystemSettingsPanel } from "@/features/settings/components/SystemSettingsPanel";
 export { WhatsAppSettingsPanel } from "@/features/settings/components/WhatsAppSettingsPanel";
+export { FirstRunGuide } from "@/features/settings/components/FirstRunGuide";

@@ -15,3 +15,4 @@ export {
   type ActivationPhase,
   type LicenseActivation,
 } from "@/features/settings/hooks/useEvolutionLicenseActivation";
+export { useSetupProgress } from "@/features/settings/hooks/useSetupProgress";

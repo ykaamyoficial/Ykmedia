@@ -460,3 +460,70 @@ def test_an_unverifiable_license_blocks_the_steps_that_depend_on_it(tmp_path: Pa
     # E o teste final nao repete a mesma causa como um terceiro vermelho.
     diagnostic = next(step for step in report.steps if step.key == "diagnostic")
     assert diagnostic.status is SetupStepStatus.PENDING
+
+
+def test_progress_is_published_while_the_steps_run(tmp_path: Path, monkeypatch) -> None:
+    """A tela precisa ver a etapa atual, nao um spinner mudo por minutos."""
+    from app.services.setup_progress import SetupProgressStore
+
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+    progress = SetupProgressStore()
+    seen: list[tuple[str, SetupStepStatus]] = []
+
+    class SpyEnvironment(FakeEnvironmentManager):
+        def prepare(self, install_docker: bool = True):
+            # Durante a etapa Ambiente, o instantaneo ja deve mostra-la correndo.
+            snapshot = progress.snapshot()
+            step = next(s for s in snapshot.steps if s.key == "environment")
+            seen.append((step.key, step.status))
+            return super().prepare(install_docker)
+
+    AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=SpyEnvironment(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+        progress_store=progress,
+    ).prepare()
+
+    assert seen == [("environment", SetupStepStatus.RUNNING)]
+    assert progress.is_running() is False
+    assert progress.snapshot().status is SetupStepStatus.OK
+
+
+def test_a_second_prepare_does_not_run_in_parallel(tmp_path: Path, monkeypatch) -> None:
+    """Clicar duas vezes disparava dois `docker compose up` competindo pelos
+    mesmos containers."""
+    from app.services.setup_progress import SetupProgressStore
+
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+    progress = SetupProgressStore()
+    runs = {"count": 0}
+
+    class CountingEnvironment(FakeEnvironmentManager):
+        def prepare(self, install_docker: bool = True):
+            runs["count"] += 1
+            return super().prepare(install_docker)
+
+    service = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=CountingEnvironment(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+        progress_store=progress,
+    )
+
+    # Simula um preparo em andamento quando o segundo clique chega.
+    progress.start([("config", "Configuracao")])
+    report = service.prepare()
+
+    assert runs["count"] == 0, "o segundo preparo nao pode rodar em paralelo"
+    assert report.status is SetupStepStatus.RUNNING

@@ -220,3 +220,38 @@ describe("SystemSettingsPanel — um problema por vez", () => {
     expect(screen.getByText("Aguardando")).toBeInTheDocument();
   });
 });
+
+describe("SystemSettingsPanel — progresso ao vivo", () => {
+  it("shows the live steps instead of a mute spinner", () => {
+    // O preparo leva minutos: sem isso a tela ficava muda e o usuario nao
+    // sabia se estava trabalhando ou travado.
+    render(
+      <SystemSettingsPanel
+        preparing
+        progress={{
+          running: true,
+          status: "RUNNING",
+          message: "Preparando o sistema...",
+          steps: [
+            { key: "config", label: "Configuracoes seguras", status: "OK", message: "pronto" },
+            { key: "environment", label: "Ambiente", status: "RUNNING", message: "Em andamento..." },
+            { key: "backend", label: "Backend", status: "PENDING", message: "Aguardando a vez." },
+          ],
+        }}
+        onPrepare={noop}
+        onDiagnostics={noop}
+      />,
+    );
+
+    expect(screen.getByText("Ambiente")).toBeInTheDocument();
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
+    // O caminho inteiro aparece desde o inicio, nao uma lista que cresce.
+    expect(screen.getByText("Backend")).toBeInTheDocument();
+  });
+
+  it("still explains the wait when no progress arrived yet", () => {
+    render(<SystemSettingsPanel preparing onPrepare={noop} onDiagnostics={noop} />);
+
+    expect(screen.getByText(/pode levar vários minutos/i)).toBeInTheDocument();
+  });
+});

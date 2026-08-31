@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends
 
 from app.models.settings import (
+    SetupProgressResponse,
+    SetupStepResponse,
     AppSettingsResponse,
     DiagnosticReportResponse,
     EvolutionLicenseResponse,
@@ -9,11 +11,13 @@ from app.models.settings import (
     SetupReportResponse,
 )
 from app.services.application_factory import (
+    get_setup_progress_store,
     get_evolution_license_service,
     get_settings_query_service,
 )
 from app.services.evolution_license_service import EvolutionLicenseService
 from app.services.settings_query_service import SettingsQueryService
+from app.services.setup_progress import SetupProgressStore
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -55,6 +59,37 @@ def disconnect_evolution_session(
 @router.post("/prepare", response_model=SetupReportResponse)
 def prepare_system(service: SettingsQueryService = Depends(get_settings_query_service)) -> SetupReportResponse:
     return service.prepare_system()
+
+
+@router.get("/prepare/status", response_model=SetupProgressResponse)
+def prepare_status(
+    store: SetupProgressStore = Depends(get_setup_progress_store),
+) -> SetupProgressResponse:
+    """Andamento do preparo em curso.
+
+    O POST /prepare demora minutos e so responde no fim; a tela consulta esta
+    rota enquanto espera, para mostrar em que etapa o sistema esta.
+    """
+    snapshot = store.snapshot()
+    if snapshot is None:
+        return SetupProgressResponse(running=False, status="PENDING", message="", steps=[])
+
+    return SetupProgressResponse(
+        running=store.is_running(),
+        status=snapshot.status.value,
+        message=snapshot.message,
+        steps=[
+            SetupStepResponse(
+                key=step.key,
+                label=step.label,
+                status=step.status.value,
+                message=step.message,
+                detail=step.detail,
+                action=step.action,
+            )
+            for step in snapshot.steps
+        ],
+    )
 
 
 @router.get("/diagnostics", response_model=DiagnosticReportResponse)

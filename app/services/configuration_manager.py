@@ -330,6 +330,7 @@ class AutomaticSetupService:
         ffmpeg_manager: FfmpegManager,
         license_service: "EvolutionLicenseService | None" = None,
         runtime_root: str | Path | None = None,
+        progress_store=None,
     ) -> None:
         self._configuration_manager = configuration_manager
         self._environment_manager = environment_manager
@@ -339,6 +340,7 @@ class AutomaticSetupService:
         self._ffmpeg_manager = ffmpeg_manager
         self._license_service = license_service
         self._runtime_root = runtime_root or os.environ.get("YKMEDIA_RUNTIME_ROOT")
+        self._progress = progress_store
 
     def _step_plan(self) -> list["_StepSpec"]:
         """Cada etapa declara de que depende.
@@ -373,10 +375,23 @@ class AutomaticSetupService:
         ]
 
     def prepare(self) -> SetupReport:
+        plan = self._step_plan()
+
+        # Um preparo ja em andamento: devolvemos o andamento dele em vez de
+        # disparar um segundo `docker compose up` competindo pelos mesmos
+        # containers.
+        if self._progress is not None and self._progress.is_running():
+            running = self._progress.snapshot()
+            if running is not None:
+                return running
+
+        if self._progress is not None:
+            self._progress.start([(spec.key, spec.label) for spec in plan])
+
         steps: list[SetupStepResult] = []
         done: dict[str, SetupStepResult] = {}
 
-        for spec in self._step_plan():
+        for spec in plan:
             blocker = self._blocking_dependency(spec, done)
             if blocker is not None:
                 # Nao executamos, mas tambem nao escondemos: a etapa aparece
@@ -388,14 +403,20 @@ class AutomaticSetupService:
                     f"Aguardando a etapa {blocker.label} ser resolvida primeiro.",
                 )
             else:
+                if self._progress is not None:
+                    self._progress.mark_running(spec.key)
                 result = self._safe_step(spec.key, spec.label, spec.run)
 
             done[spec.key] = result
             steps.append(result)
+            if self._progress is not None:
+                self._progress.record(result)
 
         status = self._overall_status(steps)
         message = "Sistema pronto." if status is SetupStepStatus.OK else "Alguns itens ainda precisam de atencao."
         report = SetupReport(status=status, steps=steps, message=message)
+        if self._progress is not None:
+            self._progress.finish(message=message, status=status)
         self._persist(report)
         return report
 

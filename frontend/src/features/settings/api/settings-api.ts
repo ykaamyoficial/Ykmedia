@@ -7,11 +7,13 @@ import {
   evolutionLicenseSchema,
   evolutionSessionSchema,
   saveAppSettingsSchema,
+  setupProgressSchema,
   setupReportSchema,
   type AppSettings,
   type DiagnosticReport,
   type EvolutionLicense,
   type EvolutionSession,
+  type SetupProgress,
   type SetupReport,
 } from "@/features/settings/types";
 
@@ -109,6 +111,15 @@ export async function startEvolutionLicenseRegistration(): Promise<EvolutionLice
   const parsed = evolutionLicenseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new ValidationError("License registration payload is invalid.", parsed.error);
+  }
+  return parsed.data;
+}
+
+export async function fetchSetupProgress(): Promise<SetupProgress> {
+  const payload = await httpClient.getJson<unknown>("/settings/prepare/status");
+  const parsed = setupProgressSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new ValidationError("Setup progress payload is invalid.", parsed.error);
   }
   return parsed.data;
 }
