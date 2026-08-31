@@ -35,13 +35,26 @@ class EvolutionClient:
         timeout_seconds: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.base_url = (base_url or settings.EVOLUTION_BASE_URL).rstrip("/")
+        self._base_url = base_url.rstrip("/") if base_url else None
         self._api_key = api_key
         self.timeout_seconds = (
             timeout_seconds if timeout_seconds is not None else settings.EVOLUTION_TIMEOUT_SECONDS
         )
         self._transport = transport
         self._client: httpx.AsyncClient | None = None
+
+    @property
+    def base_url(self) -> str:
+        """Lida a cada uso, nao congelada na construcao.
+
+        O preparo pode trocar a porta da Evolution com o app ja rodando (o
+        Windows reserva faixas de portas). Como o cliente e criado uma vez
+        (lru_cache), a URL antiga sobrevivia e tudo acusava "offline" ate o
+        usuario reiniciar o programa.
+        """
+        if self._base_url is not None:
+            return self._base_url
+        return settings.EVOLUTION_BASE_URL.rstrip("/")
 
     @property
     def headers(self) -> dict[str, str]:

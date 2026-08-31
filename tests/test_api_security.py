@@ -3,12 +3,21 @@ from fastapi.testclient import TestClient
 from app.core.config import settings
 from app.main import create_app
 from app.models.categories import CategoriesResponse
-from app.services.application_factory import get_category_query_service
+from app.models.settings import SetupReportResponse
+from app.services.application_factory import (
+    get_category_query_service,
+    get_settings_query_service,
+)
 
 
 class _FakeCategoryQueryService:
     def list_categories(self) -> CategoriesResponse:
         return CategoriesResponse(items=[], total=0)
+
+
+class _FakeSettingsQueryService:
+    def prepare_system(self) -> SetupReportResponse:
+        return SetupReportResponse(status="OK", message="preparo simulado", steps=[])
 
 
 def _client() -> TestClient:
@@ -64,7 +73,12 @@ def test_prepare_requires_the_token_that_the_tauri_shell_must_send(monkeypatch) 
     nunca subiam, sem nenhuma pista na interface.
     """
     monkeypatch.setattr(settings, "API_AUTH_TOKEN", "segredo-local")
-    client = _client()
+    # O que se testa aqui e a autenticacao, nao o preparo. Sem isolar, a rota
+    # executava o preparo de verdade: Docker, download de imagens e a espera
+    # pela Evolution responder -- tres minutos por teste.
+    app = create_app()
+    app.dependency_overrides[get_settings_query_service] = lambda: _FakeSettingsQueryService()
+    client = TestClient(app)
 
     assert client.post("/settings/prepare").status_code == 401
     assert (

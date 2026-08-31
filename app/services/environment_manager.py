@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -15,6 +17,10 @@ from app.services.port_allocator import PortAllocator, read_port_from_env
 
 logger = logging.getLogger(__name__)
 
+#: A Evolution escreve o log colorido; os codigos ANSI viram lixo ilegivel na
+#: tela ("[1m[37m[Evolution API]").
+_ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
 
 class EnvironmentStatus(StrEnum):
     READY = "PRONTO"
@@ -22,6 +28,20 @@ class EnvironmentStatus(StrEnum):
     DOCKER_STOPPED = "DOCKER_PARADO"
     CONFIG_MISSING = "CONFIGURACAO_PENDENTE"
     ERROR = "ERRO"
+
+
+@dataclass(frozen=True, slots=True)
+class ContainerState:
+    name: str
+    service: str
+    state: str
+    health: str
+    exit_code: int
+
+    @property
+    def is_up(self) -> bool:
+        """"running" com health "starting" ainda conta: o container esta de pe."""
+        return self.state.lower() == "running" and self.health.lower() != "unhealthy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,16 +169,30 @@ class EnvironmentManager:
             )
 
         containers_running = self._wait_for_containers(self.CONTAINER_STARTUP_TIMEOUT_SECONDS)
+        if containers_running:
+            return EnvironmentCheck(
+                status=EnvironmentStatus.READY,
+                docker_installed=True,
+                docker_running=True,
+                compose_available=True,
+                containers_running=True,
+                message="Ambiente preparado e containers iniciados.",
+                port=self.current_port(),
+            )
 
+        headline, detail = self._stopped_containers_message(compose_path)
         return EnvironmentCheck(
-            status=EnvironmentStatus.READY if containers_running else EnvironmentStatus.ERROR,
+            status=EnvironmentStatus.ERROR,
             docker_installed=True,
             docker_running=True,
             compose_available=True,
-            containers_running=containers_running,
-            message="Ambiente preparado e containers iniciados."
-            if containers_running
-            else self._stopped_containers_message(compose_path),
+            containers_running=False,
+            message=headline,
+            detail=detail,
+            action=(
+                "Clique em Ver detalhes tecnicos para ver o log do servico que "
+                "falhou, e em Copiar detalhes para enviar ao suporte."
+            ),
             port=self.current_port(),
         )
 
@@ -430,19 +464,95 @@ class EnvironmentManager:
         detail = stderr or stdout or str(error)
         return f"Falha ao executar Docker Compose: {detail}"
 
-    def _stopped_containers_message(self, compose_path: Path) -> str:
-        """Diz qual container ficou parado e por que, em vez de so falhar."""
+    def container_states(self, compose_path: Path) -> list[ContainerState]:
+        """Estado de cada servico, em vez de um unico "deu errado".
+
+        Na maquina do usuario o Postgres e o Redis subiram saudaveis e so a
+        Evolution falhou; a tela dizia apenas "Ambiente: ERROR", como se nada
+        tivesse funcionado.
+        """
         result = self._run(
-            self._compose_command(compose_path, ["ps", "--all", "--format", "{{.Name}} {{.Status}}"]),
+            self._compose_command(compose_path, ["ps", "--all", "--format", "json"]),
             cwd=compose_path.parent,
             check=False,
             timeout=30,
         )
-        detail = str(getattr(result, "stdout", "") or "").strip()
-        if not detail:
-            return "Docker Compose executou, mas nem todos os containers ficaram ativos."
+        return self._parse_container_states(str(getattr(result, "stdout", "") or ""))
 
-        return (
-            "Docker Compose executou, mas nem todos os containers ficaram ativos:\n"
-            f"{detail}"
+    def _parse_container_states(self, output: str) -> list[ContainerState]:
+        stripped = output.strip()
+        if not stripped:
+            return []
+
+        # Versoes recentes do Compose emitem um objeto por linha; as anteriores,
+        # um array unico. Aceitamos os dois formatos.
+        try:
+            parsed = json.loads(stripped)
+            entries = parsed if isinstance(parsed, list) else [parsed]
+        except json.JSONDecodeError:
+            entries = []
+            for line in stripped.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        states: list[ContainerState] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            states.append(
+                ContainerState(
+                    name=str(entry.get("Name", "")),
+                    service=str(entry.get("Service", "")),
+                    state=str(entry.get("State", "")),
+                    health=str(entry.get("Health", "") or ""),
+                    exit_code=int(entry.get("ExitCode", 0) or 0),
+                )
+            )
+        return states
+
+    def _stopped_containers_message(self, compose_path: Path) -> tuple[str, str]:
+        """Devolve (manchete, detalhe) descrevendo o que subiu e o que nao."""
+        states = self.container_states(compose_path)
+        if not states:
+            return (
+                "Docker Compose executou, mas nem todos os containers ficaram ativos.",
+                "",
+            )
+
+        healthy = [state for state in states if state.is_up]
+        broken = [state for state in states if not state.is_up]
+        names = ", ".join(state.name or state.service for state in broken)
+        headline = (
+            f"{len(healthy)} de {len(states)} servicos subiram. "
+            f"Nao ficou de pe: {names}."
         )
+
+        # So o log de quem falhou: puxar os tres seria lento e enterraria o que
+        # importa no meio de milhares de linhas.
+        details = [
+            "\n".join(f"{state.name}: {state.state} {state.health}".strip() for state in states)
+        ]
+        for state in broken:
+            if not state.service:
+                continue
+            log = self._container_log(compose_path, state.service)
+            if log:
+                details.append(f"--- {state.name} ---\n{log}")
+
+        return headline, "\n\n".join(details).strip()
+
+    def _container_log(self, compose_path: Path, service: str) -> str:
+        result = self._run(
+            self._compose_command(compose_path, ["logs", "--tail", "20", service]),
+            cwd=compose_path.parent,
+            check=False,
+            timeout=30,
+        )
+        stdout = str(getattr(result, "stdout", "") or "").strip()
+        stderr = str(getattr(result, "stderr", "") or "").strip()
+        return _ANSI.sub("", stdout or stderr)

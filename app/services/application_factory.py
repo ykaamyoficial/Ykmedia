@@ -247,6 +247,9 @@ def get_automatic_setup_service() -> AutomaticSetupService:
         diagnostic_service=get_diagnostic_service(),
         ffmpeg_manager=get_ffmpeg_manager(),
         license_service=get_evolution_license_service(),
+        # Grava o relatorio em logs/setup-report.json: sem isto ele so existe
+        # enquanto a tela estiver aberta.
+        runtime_root=get_environment_manager().runtime_root,
     )
 
 

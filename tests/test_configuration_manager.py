@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from app.services.backend_runtime_manager import BackendRuntimeSnapshot, BackendRuntimeState
@@ -214,8 +215,12 @@ def test_setup_stops_before_provisioning_when_license_is_pending(tmp_path: Path,
     license_step = next(step for step in report.steps if step.key == "license")
     assert license_step.status is SetupStepStatus.ERROR
     assert "Ativar licenca" in license_step.message
-    # Sem licenca a Evolution responde 503: nao adianta provisionar.
-    assert "evolution" not in [step.key for step in report.steps]
+    # Sem licenca a Evolution responde 503: nao adianta provisionar. A etapa
+    # continua visivel como Aguardando -- esconde-la deixaria o usuario sem
+    # saber que ela existe e por que nao rodou.
+    evolution_step = next(step for step in report.steps if step.key == "evolution")
+    assert evolution_step.status is SetupStepStatus.PENDING
+    assert "Licenca" in evolution_step.message
     assert report.status is SetupStepStatus.ERROR
 
 
@@ -300,11 +305,11 @@ def test_evolution_steps_are_skipped_when_the_environment_failed(tmp_path: Path,
         license_service=FakeLicenseService(LicenseStatus.ACTIVE),
     ).prepare()
 
-    keys = [step.key for step in report.steps]
-    assert "evolution" not in keys
+    evolution_step = next(step for step in report.steps if step.key == "evolution")
+    assert evolution_step.status is SetupStepStatus.PENDING
     license_step = next(step for step in report.steps if step.key == "license")
     assert license_step.status is SetupStepStatus.PENDING
-    assert "containers" in license_step.message.lower()
+    assert "ambiente" in license_step.message.lower()
 
 
 class SlowLicenseService:
@@ -349,3 +354,109 @@ def test_license_waits_for_evolution_to_answer(tmp_path: Path, monkeypatch) -> N
     license_step = next(step for step in report.steps if step.key == "license")
     assert license_step.status is SetupStepStatus.OK
     assert license_service.attempts >= 4
+
+
+def test_a_single_cause_produces_a_single_red_item(tmp_path: Path, monkeypatch) -> None:
+    """A tela do usuario mostrava tres erros para uma causa so.
+
+    Ambiente falhou -> Licenca, Evolution e "Teste final" repetiam a mesma
+    causa com outras palavras, escondendo qual deles precisava de acao.
+    """
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FailingEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+    ).prepare()
+
+    failed = [step for step in report.steps if step.status is SetupStepStatus.ERROR]
+
+    assert [step.key for step in failed] == ["environment"]
+    waiting = [step for step in report.steps if step.status is SetupStepStatus.PENDING]
+    assert {step.key for step in waiting} == {"license", "evolution", "diagnostic"}
+    # Cada uma aponta para a etapa que precisa ser resolvida antes.
+    assert all(step.message.startswith("Aguardando a etapa ") for step in waiting)
+
+
+def test_independent_steps_still_run_when_something_else_failed(tmp_path: Path, monkeypatch) -> None:
+    """O FFmpeg nao depende do Docker: bloquea-lo seria esconder informacao."""
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+    ffmpeg = tmp_path / "bin" / "ffmpeg.exe"
+    ffmpeg.parent.mkdir()
+    ffmpeg.write_text("fake", encoding="utf-8")
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FailingEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+    ).prepare()
+
+    ffmpeg_step = next(step for step in report.steps if step.key == "ffmpeg")
+    assert ffmpeg_step.status is not SetupStepStatus.PENDING
+
+
+def test_the_report_is_written_to_disk(tmp_path: Path, monkeypatch) -> None:
+    """Se a janela fechar, o relatorio precisa continuar existindo: hoje ele so
+    existe enquanto a tela estiver aberta."""
+    monkeypatch.chdir(tmp_path)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FakeEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.ACTIVE),
+        runtime_root=tmp_path / "runtime",
+    ).prepare()
+
+    report_file = tmp_path / "runtime" / "logs" / "setup-report.json"
+    assert report_file.exists()
+    saved = json.loads(report_file.read_text(encoding="utf-8"))
+    assert saved["status"] == "OK"
+    assert any(step["key"] == "environment" for step in saved["steps"])
+    assert "gerado_em" in saved
+
+
+def test_an_unverifiable_license_blocks_the_steps_that_depend_on_it(tmp_path: Path, monkeypatch) -> None:
+    """WARNING tambem bloqueia.
+
+    Com a Evolution fora do ar a licenca fica em WARNING ("nao consegui falar"),
+    e provisionar em seguida produzia um segundo vermelho para a mesma causa.
+    """
+    monkeypatch.chdir(tmp_path)
+    # Sem zerar, a espera pela Evolution gira os 120s reais do tempo limite.
+    monkeypatch.setattr(AutomaticSetupService, "EVOLUTION_READY_TIMEOUT_SECONDS", 0)
+    configuration = AppConfigurationManager(project_root=tmp_path)
+
+    report = AutomaticSetupService(
+        configuration_manager=configuration,
+        environment_manager=FakeEnvironmentManager(),
+        backend_runtime_manager=FakeBackendRuntimeManager(),
+        evolution_provisioning_manager=FakeEvolutionProvisioning(),
+        diagnostic_service=FakeDiagnosticService(),
+        ffmpeg_manager=FfmpegManager(configuration_manager=configuration, project_root=tmp_path),
+        license_service=FakeLicenseService(LicenseStatus.UNAVAILABLE),
+    ).prepare()
+
+    license_step = next(step for step in report.steps if step.key == "license")
+    assert license_step.status is SetupStepStatus.WARNING
+
+    evolution_step = next(step for step in report.steps if step.key == "evolution")
+    assert evolution_step.status is SetupStepStatus.PENDING
+    # E o teste final nao repete a mesma causa como um terceiro vermelho.
+    diagnostic = next(step for step in report.steps if step.key == "diagnostic")
+    assert diagnostic.status is SetupStepStatus.PENDING

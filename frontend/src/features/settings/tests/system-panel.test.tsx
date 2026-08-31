@@ -162,3 +162,61 @@ describe("SystemSettingsPanel — mensagem em camadas", () => {
     expect(screen.queryByText("ERROR")).not.toBeInTheDocument();
   });
 });
+
+describe("SystemSettingsPanel — um problema por vez", () => {
+  const cascade = {
+    status: "ERROR",
+    message: "Alguns itens ainda precisam de atencao.",
+    steps: [
+      { key: "config", label: "Configuracoes seguras", status: "OK", message: "Pronto." },
+      {
+        key: "environment",
+        label: "Ambiente",
+        status: "ERROR",
+        message: "2 de 3 servicos subiram. Nao ficou de pe: ykmedia_evolution.",
+        action: "Veja o log do servico que falhou.",
+        detail: "ykmedia_evolution: exited",
+      },
+      {
+        key: "license",
+        label: "Licenca da Evolution",
+        status: "PENDING",
+        message: "Aguardando a etapa Ambiente ser resolvida primeiro.",
+      },
+    ],
+  };
+
+  it("promotes the blocking step above the rest", () => {
+    // A tela tratava os sete itens com o mesmo peso: o usuario precisava
+    // descobrir sozinho qual deles exigia acao.
+    render(<SystemSettingsPanel setup={cascade} onPrepare={noop} onDiagnostics={noop} />);
+
+    const highlight = screen.getByTestId("blocking-step");
+    expect(highlight).toHaveTextContent("Ambiente");
+    expect(highlight).toHaveTextContent("Nao ficou de pe: ykmedia_evolution");
+    expect(highlight).toHaveTextContent("Veja o log do servico que falhou");
+  });
+
+  it("does not promote anything when every step worked", () => {
+    render(
+      <SystemSettingsPanel
+        setup={{
+          status: "OK",
+          message: "Sistema pronto.",
+          steps: [{ key: "config", label: "Configuracao", status: "OK", message: "Pronto." }],
+        }}
+        onPrepare={noop}
+        onDiagnostics={noop}
+      />,
+    );
+
+    expect(screen.queryByTestId("blocking-step")).not.toBeInTheDocument();
+  });
+
+  it("keeps the waiting steps visible but quiet", () => {
+    render(<SystemSettingsPanel setup={cascade} onPrepare={noop} onDiagnostics={noop} />);
+
+    // Aguardando nao e problema do usuario: e ordem de execucao.
+    expect(screen.getByText("Aguardando")).toBeInTheDocument();
+  });
+});
