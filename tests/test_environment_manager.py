@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 
+from app.core.config import settings
 from app.services.environment_manager import EnvironmentManager, EnvironmentStatus
 
 
@@ -107,7 +108,9 @@ def test_download_timeout_becomes_a_readable_message_instead_of_crashing(tmp_pat
 
     assert check.status is EnvironmentStatus.ERROR
     assert "demorou demais" in check.message
-    assert "retoma de onde parou" in check.message
+    # A manchete diz o que houve; a acao, o que fazer. Sao campos distintos
+    # para a tela nao precisar misturar os dois no mesmo paragrafo.
+    assert "retoma de onde parou" in check.action
 
 
 def test_images_are_pulled_before_starting_the_containers(tmp_path: Path) -> None:
@@ -167,3 +170,113 @@ def test_containers_get_time_to_finish_starting(tmp_path: Path, monkeypatch) -> 
 
     assert check.status is EnvironmentStatus.READY
     assert check.containers_running is True
+
+
+PORT_RESERVED_STDERR = (
+    "Container ykmedia_postgres Healthy\n"
+    "Error response from daemon: ports are not available: exposing port "
+    "TCP 0.0.0.0:8080 -> 127.0.0.1:0: listen tcp 0.0.0.0:8080: bind: "
+    "proibida pelas permissoes de acesso."
+)
+
+
+def test_a_reserved_port_is_replaced_automatically(tmp_path: Path, monkeypatch) -> None:
+    """Era o erro da maquina do usuario em 30/08.
+
+    O Windows reserva faixas de portas com Hyper-V/WSL2 ativos e a faixa muda a
+    cada reinicio. Com a 8080 fixa no compose a instalacao morria sem saida;
+    agora o sistema escolhe outra porta e segue sozinho.
+    """
+    monkeypatch.setattr("app.services.environment_manager.time.sleep", lambda _: None)
+    attempts = {"up": 0}
+
+    def runner(command, **kwargs):
+        if command[:2] == ["docker", "compose"] and "up" in command:
+            attempts["up"] += 1
+            if attempts["up"] == 1:
+                raise subprocess.CalledProcessError(
+                    returncode=1, cmd=command, output="", stderr=PORT_RESERVED_STDERR
+                )
+        if command[:2] == ["docker", "ps"]:
+            stdout = (
+                "ykmedia_evolution\nykmedia_postgres\nykmedia_redis\n"
+                if attempts["up"] >= 2
+                else ""
+            )
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=stdout, stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    manager = EnvironmentManager(
+        runtime_root=tmp_path / "runtime",
+        command_runner=runner,
+        port_allocator=_FixedPortAllocator(8090),
+    )
+
+    check = manager.prepare(install_docker=False)
+
+    assert check.status is EnvironmentStatus.READY
+    assert attempts["up"] == 2, "a segunda tentativa com a porta nova nao aconteceu"
+    assert check.port == 8090
+    env_content = (tmp_path / "runtime" / "docker" / ".env").read_text(encoding="utf-8")
+    assert "EVOLUTION_PORT=8090" in env_content
+
+
+def test_an_unknown_failure_is_not_retried_forever(tmp_path: Path) -> None:
+    """So repetimos quando sabemos que a causa foi contornada."""
+
+    def runner(command, **kwargs):
+        if command[:2] == ["docker", "compose"] and "up" in command:
+            raise subprocess.CalledProcessError(
+                returncode=1, cmd=command, output="", stderr="Error response from daemon: algo novo"
+            )
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+
+    check = manager.prepare(install_docker=False)
+
+    assert check.status is EnvironmentStatus.ERROR
+    assert "suporte" in check.action.lower()
+    # O texto tecnico segue disponivel para o suporte, fora da manchete.
+    assert "algo novo" in check.detail
+
+
+def test_docker_output_is_decoded_as_utf8(tmp_path: Path) -> None:
+    """Sem isto o Python usava a pagina de codigo do Windows e o portugues do
+    Docker chegava como "permissAues" na tela."""
+    captured: dict[str, object] = {}
+
+    def runner(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime", command_runner=runner)
+    manager._docker_is_running()
+
+    assert captured.get("encoding") == "utf-8"
+    assert captured.get("errors") == "replace"
+
+
+class _FixedPortAllocator:
+    def __init__(self, port: int) -> None:
+        self._port = port
+
+    def allocate(self, preferred: int | None = None) -> int:
+        return self._port
+
+
+def test_the_chosen_port_survives_a_restart(tmp_path: Path) -> None:
+    """O backend reinicia sem passar pelo preparo.
+
+    Sem reler a porta gravada, ele voltava apontando para a 8080 enquanto a
+    Evolution estava publicada noutra porta -- e tudo respondia "offline".
+    """
+    docker_directory = tmp_path / "runtime" / "docker"
+    docker_directory.mkdir(parents=True)
+    (docker_directory / ".env").write_text("EVOLUTION_PORT=8090\n", encoding="utf-8")
+
+    manager = EnvironmentManager(runtime_root=tmp_path / "runtime")
+    manager.sync_settings_from_runtime()
+
+    assert settings.EVOLUTION_PORT == 8090
+    assert settings.EVOLUTION_BASE_URL == "http://localhost:8090"

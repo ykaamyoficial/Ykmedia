@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import shutil
@@ -9,6 +10,10 @@ from enum import StrEnum
 from pathlib import Path
 
 from app.core.config import settings
+from app.services.docker_failure import classify
+from app.services.port_allocator import PortAllocator, read_port_from_env
+
+logger = logging.getLogger(__name__)
 
 
 class EnvironmentStatus(StrEnum):
@@ -26,7 +31,12 @@ class EnvironmentCheck:
     docker_running: bool
     compose_available: bool
     containers_running: bool
+    #: Manchete em linguagem comum. O log tecnico vai em `detail`, para que a
+    #: tela nao precise misturar os dois no mesmo paragrafo.
     message: str
+    detail: str = ""
+    action: str = ""
+    port: int | None = None
 
 
 class EnvironmentManager:
@@ -36,11 +46,13 @@ class EnvironmentManager:
         self,
         runtime_root: str | Path | None = None,
         command_runner=subprocess.run,
+        port_allocator=None,
     ) -> None:
         self.runtime_root = Path(
             runtime_root or Path(os.environ.get("LOCALAPPDATA", ".")) / "YkMedia"
         ).resolve()
         self.command_runner = command_runner
+        self.port_allocator = port_allocator or PortAllocator(command_runner=command_runner)
 
     def check(self) -> EnvironmentCheck:
         docker_installed = self._command_exists("docker")
@@ -122,21 +134,18 @@ class EnvironmentManager:
             )
 
         compose_path = self._prepare_runtime_files()
-        try:
-            self._compose_pull(compose_path)
-            self._compose_up(compose_path)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            # TimeoutExpired nao era capturado aqui: numa instalacao nova o
-            # download das imagens estourava o limite, a excecao subia ate virar
-            # erro 500 e o usuario via apenas "Nao foi possivel preparar o
-            # sistema", com os containers parados em "Created".
+        failure = self._start_containers(compose_path)
+        if failure is not None:
             return EnvironmentCheck(
                 status=EnvironmentStatus.ERROR,
                 docker_installed=True,
                 docker_running=True,
                 compose_available=True,
                 containers_running=self._containers_are_running(),
-                message=self._format_command_error(exc),
+                message=failure.headline,
+                detail=failure.detail,
+                action=failure.action,
+                port=self.current_port(),
             )
 
         containers_running = self._wait_for_containers(self.CONTAINER_STARTUP_TIMEOUT_SECONDS)
@@ -150,7 +159,67 @@ class EnvironmentManager:
             message="Ambiente preparado e containers iniciados."
             if containers_running
             else self._stopped_containers_message(compose_path),
+            port=self.current_port(),
         )
+
+    def _start_containers(self, compose_path: Path):
+        """Sobe os containers, contornando sozinho o que da para contornar.
+
+        Uma porta reservada pelo Windows nao se resolve repetindo o mesmo
+        comando: e preciso escolher outra porta antes de tentar de novo. Como o
+        sistema tem essa informacao, ele faz isso sem perguntar nada ao usuario.
+        """
+        for attempt in range(self.START_ATTEMPTS):
+            try:
+                self._compose_pull(compose_path)
+                self._compose_up(compose_path)
+                return None
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                failure = classify(exc)
+                last_attempt = attempt == self.START_ATTEMPTS - 1
+                if not failure.can_retry_automatically or last_attempt:
+                    return failure
+
+                logger.warning(
+                    "Preparo contornando %s: escolhendo outra porta para a Evolution",
+                    failure.kind,
+                )
+                self._reassign_port(compose_path, blocked=failure.port)
+
+        return None
+
+    def _reassign_port(self, compose_path: Path, blocked: int | None) -> None:
+        env_path = compose_path.parent / ".env"
+        values = self._read_env(env_path)
+        candidate = self.port_allocator.allocate()
+        if blocked is not None and candidate == blocked:
+            # O alocador nao viu a reserva (a lista do Windows nem sempre a
+            # mostra): forcamos a proxima candidata.
+            candidate = self.port_allocator.allocate(preferred=blocked + 10)
+
+        values["EVOLUTION_PORT"] = str(candidate)
+        self._write_env(env_path, values)
+        self._apply_port(candidate)
+
+    def sync_settings_from_runtime(self) -> int | None:
+        """Realinha a URL da Evolution com a porta gravada em disco.
+
+        O backend reinicia sem passar pelo preparo. Sem isto ele voltava
+        apontando para a 8080 enquanto a Evolution estava publicada noutra
+        porta, e a interface inteira acusava "offline".
+        """
+        port = self.current_port()
+        if port is not None:
+            self._apply_port(port)
+        return port
+
+    def current_port(self) -> int | None:
+        return read_port_from_env(self.runtime_root / "docker" / ".env")
+
+    def _apply_port(self, port: int) -> None:
+        """A URL da Evolution tem de acompanhar a porta escolhida."""
+        settings.EVOLUTION_PORT = port
+        settings.EVOLUTION_BASE_URL = f"http://localhost:{port}"
 
     def runtime_compose_path(self) -> Path:
         return self.runtime_root / "docker" / "docker-compose.yml"
@@ -172,11 +241,22 @@ class EnvironmentManager:
         api_key = values.get("EVOLUTION_API_KEY") or settings.EVOLUTION_API_KEY
         if not api_key:
             api_key = secrets.token_urlsafe(32)
-
         values["EVOLUTION_API_KEY"] = api_key
+
+        # A porta escolhida numa execucao anterior tem prioridade: trocar a
+        # porta de quem ja funciona quebraria a URL da Evolution e o pareamento
+        # do WhatsApp.
+        existing_port = read_port_from_env(env_path)
+        port = existing_port or self.port_allocator.allocate(preferred=settings.EVOLUTION_PORT)
+        values["EVOLUTION_PORT"] = str(port)
+
+        self._write_env(env_path, values)
+        settings.EVOLUTION_API_KEY = api_key
+        self._apply_port(port)
+
+    def _write_env(self, env_path: Path, values: dict[str, str]) -> None:
         env_content = "\n".join(f"{key}={value}" for key, value in sorted(values.items()))
         env_path.write_text(f"{env_content}\n", encoding="utf-8")
-        settings.EVOLUTION_API_KEY = api_key
 
     def _read_env(self, env_path: Path) -> dict[str, str]:
         if not env_path.exists():
@@ -241,6 +321,9 @@ class EnvironmentManager:
     #: `compose up -d` devolve o controle assim que os containers sao criados,
     #: nao quando sobem. Postgres e Redis precisam inicializar o volume e a
     #: Evolution roda as migracoes: numa maquina modesta isso passa de um minuto.
+    #: Uma retentativa basta: a segunda ja sai com a porta trocada. Repetir
+    #: alem disso so esconderia um problema diferente.
+    START_ATTEMPTS = 2
     CONTAINER_STARTUP_TIMEOUT_SECONDS = 180
     CONTAINER_POLL_SECONDS = 3
 
@@ -317,6 +400,10 @@ class EnvironmentManager:
             "cwd": str(cwd) if cwd is not None else None,
             "capture_output": True,
             "text": True,
+            # O Docker escreve UTF-8. Sem isto o Python usava a pagina de codigo
+            # do Windows e "permissoes" chegava como "permissAues" na tela.
+            "encoding": "utf-8",
+            "errors": "replace",
             "check": check,
             "timeout": timeout,
         }

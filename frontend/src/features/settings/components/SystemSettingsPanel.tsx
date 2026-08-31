@@ -5,8 +5,30 @@ import { YkStatusBadge } from "@/components/system/YkStatusBadge";
 import { YkDataTable } from "@/shared/tables";
 import { YkIcons } from "@/shared/icons";
 import { type DiagnosticReport, type SetupReport } from "@/features/settings/types";
-import { statusTone } from "@/features/settings/utils";
+import { statusLabel, statusTone } from "@/features/settings/utils";
 import { SettingsSection } from "@/features/settings/components/SettingsSection";
+
+function TechnicalDetail({ detail }: { detail: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="text-xs font-medium text-secondary underline underline-offset-2 hover:text-foreground"
+      >
+        {open ? "Ocultar detalhes técnicos" : "Ver detalhes técnicos"}
+      </button>
+      {open ? (
+        // Rolagem propria: o log do Docker e largo e esticava a pagina inteira.
+        <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-surface p-2 text-xs text-secondary">
+          {detail}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
 
 type SystemSettingsPanelProps = {
   diagnostic?: DiagnosticReport;
@@ -33,7 +55,14 @@ export function SystemSettingsPanel({
   // Fotografar a tela corta a mensagem longa. Copiar o relatorio inteiro e a
   // forma mais rapida de o usuario nos mostrar o que realmente aconteceu.
   const copyDetails = async () => {
-    const report = steps.map((step) => `[${step.status}] ${step.label}: ${step.message}`).join("\n");
+    const report = steps
+      .map((step) => {
+        const lines = [`[${step.status}] ${step.label}: ${step.message}`];
+        if (step.action) lines.push(`  Acao: ${step.action}`);
+        if (step.detail) lines.push(`  Detalhe: ${step.detail}`);
+        return lines.join("\n");
+      })
+      .join("\n");
     try {
       await navigator.clipboard.writeText(report);
       setCopied(true);
@@ -104,13 +133,19 @@ export function SystemSettingsPanel({
                   className="flex flex-col gap-1 rounded-xl border border-border bg-background p-3 sm:flex-row sm:items-start sm:gap-3"
                 >
                   <div className="shrink-0">
-                    <YkStatusBadge label={step.status} tone={statusTone(step.status)} />
+                    <YkStatusBadge label={statusLabel(step.status)} tone={statusTone(step.status)} />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 space-y-1">
                     <p className="text-sm font-medium text-foreground">{step.label}</p>
-                    <p className="whitespace-pre-wrap break-words text-sm text-secondary">
-                      {step.message}
-                    </p>
+                    <p className="break-words text-sm text-secondary">{step.message}</p>
+
+                    {step.action ? (
+                      <p className="text-sm font-medium text-foreground">{step.action}</p>
+                    ) : null}
+
+                    {/* O log cru so aparece a pedido: com ele sempre visivel, a
+                        frase util ficava perdida no meio do bloco tecnico. */}
+                    {step.detail ? <TechnicalDetail detail={step.detail} /> : null}
                   </div>
                 </li>
               ))}

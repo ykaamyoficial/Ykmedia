@@ -169,6 +169,8 @@ class SettingsQueryService:
                     label=step.label,
                     status=step.status.value,
                     message=step.message,
+                    detail=step.detail,
+                    action=step.action,
                 )
                 for step in report.steps
             ],

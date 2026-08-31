@@ -45,11 +45,14 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      # A porta do host e escolhida no preparo: o Windows reserva faixas de
+      # portas (WinNAT) e a faixa muda a cada reinicio, o que tornava a 8080
+      # fixa um ponto unico de falha. Dentro do container segue sendo 8080.
+      - "${EVOLUTION_PORT:-8080}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      SERVER_URL: http://localhost:8080
+      SERVER_URL: http://localhost:${EVOLUTION_PORT:-8080}
 
       AUTHENTICATION_TYPE: apikey
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}

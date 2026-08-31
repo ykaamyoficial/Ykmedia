@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "YkMedia"
-    APP_VERSION: str = "0.4.1"
+    APP_VERSION: str = "0.5.0"
 
     ENVIRONMENT: str = "development"
     WEBHOOK_SECRET: str = ""
@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # persiste um valor automaticamente. Ver app/backend_entry.py.
     API_AUTH_TOKEN: str = ""
 
+    # A porta e apenas o ponto de partida: o preparo escolhe outra quando o
+    # Windows reserva esta faixa, e reescreve EVOLUTION_BASE_URL de acordo.
+    EVOLUTION_PORT: int = 8080
     EVOLUTION_BASE_URL: str = "http://localhost:8080"
     EVOLUTION_API_KEY: str = ""
     EVOLUTION_INSTANCE: str = "ykmedia"

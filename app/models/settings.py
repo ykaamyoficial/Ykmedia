@@ -41,7 +41,12 @@ class SetupStepResponse(BaseModel):
     key: str
     label: str
     status: str
+    #: `message` e a manchete; `detail` guarda o log tecnico do Docker e
+    #: `action` diz o que fazer. Separados para a tela nao empilhar os tres no
+    #: mesmo paragrafo, como acontecia ate a 0.4.1.
     message: str
+    detail: str = ""
+    action: str = ""
 
 
 class SetupReportResponse(BaseModel):

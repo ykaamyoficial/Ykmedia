@@ -1,1 +1,1 @@
-export { friendlyEvolutionState, statusTone } from "@/features/settings/utils/settings-format";
+export { friendlyEvolutionState, statusLabel, statusTone } from "@/features/settings/utils/settings-format";

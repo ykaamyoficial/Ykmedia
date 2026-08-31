@@ -34,7 +34,11 @@ class SetupStepResult:
     key: str
     label: str
     status: SetupStepStatus
+    #: Manchete em linguagem comum. O log tecnico do Docker vai em `detail` e o
+    #: que fazer vai em `action`, para a tela poder mostrar cada um no seu peso.
     message: str
+    detail: str = ""
+    action: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,29 +452,17 @@ class AutomaticSetupService:
                 self._friendly_message(check.message),
             )
 
-        # Numa falha o texto tecnico e a unica pista que o usuario tem para nos
-        # mandar. Acrescentamos o que fazer, sem apagar o que aconteceu.
+        # A manchete, o log e a acao vem separados do EnvironmentManager, ja
+        # classificados por tipo de falha. Nada de conselho generico: ate a
+        # 0.4.1 um conflito de porta recebia "tente novamente, o download
+        # continua de onde parou", que nunca resolveria.
         return SetupStepResult(
             "environment",
             "Ambiente",
             SetupStepStatus.ERROR,
-            f"{check.message}\n\n{self._environment_hint(check)}",
-        )
-
-    def _environment_hint(self, check: "EnvironmentCheck") -> str:
-        if not check.docker_installed:
-            return (
-                "O que fazer: instale o Docker Desktop, reinicie o computador e "
-                "clique em Preparar sistema novamente."
-            )
-        if not check.docker_running:
-            return (
-                "O que fazer: abra o Docker Desktop e espere o icone da baleia "
-                "ficar verde. Depois clique em Preparar sistema novamente."
-            )
-        return (
-            "O que fazer: clique em Preparar sistema novamente — o download "
-            "continua de onde parou. Se repetir, envie esta mensagem para o suporte."
+            check.message,
+            detail=check.detail,
+            action=check.action,
         )
 
     def _backend_step(self) -> SetupStepResult:

@@ -101,3 +101,64 @@ describe("SystemSettingsPanel — relatar o problema", () => {
     expect(screen.queryByRole("button", { name: /copiar detalhes/i })).not.toBeInTheDocument();
   });
 });
+
+describe("SystemSettingsPanel — mensagem em camadas", () => {
+  const portFailure = {
+    status: "ERROR",
+    message: "Alguns itens ainda precisam de atencao.",
+    steps: [
+      {
+        key: "environment",
+        label: "Ambiente",
+        status: "ERROR",
+        message: "A porta 8080 esta bloqueada pelo Windows.",
+        action: "Vou escolher outra porta automaticamente.",
+        detail: "Container ykmedia_redis Running\nError response from daemon: ports are not available",
+      },
+    ],
+  };
+
+  it("shows the headline and the action, and hides the technical log", () => {
+    // Ate a 0.4.1 o log cru do Docker aparecia com o mesmo peso do texto
+    // humano, empurrando a frase util para o meio do bloco.
+    render(<SystemSettingsPanel setup={portFailure} onPrepare={noop} onDiagnostics={noop} />);
+
+    expect(screen.getByText(/A porta 8080 esta bloqueada pelo Windows/)).toBeInTheDocument();
+    expect(screen.getByText(/Vou escolher outra porta automaticamente/)).toBeInTheDocument();
+    expect(screen.queryByText(/Error response from daemon/)).not.toBeInTheDocument();
+  });
+
+  it("reveals the technical log on demand", async () => {
+    render(<SystemSettingsPanel setup={portFailure} onPrepare={noop} onDiagnostics={noop} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /detalhes técnicos/i }));
+
+    expect(screen.getByText(/Error response from daemon/)).toBeInTheDocument();
+  });
+
+  it("translates the status badges", () => {
+    // O aplicativo e em portugues; a tela mostrava OK / ERROR / PENDING.
+    render(
+      <SystemSettingsPanel
+        setup={{
+          status: "ERROR",
+          message: "x",
+          steps: [
+            { key: "a", label: "Um", status: "OK", message: "m" },
+            { key: "b", label: "Dois", status: "ERROR", message: "m" },
+            { key: "c", label: "Tres", status: "PENDING", message: "m" },
+            { key: "d", label: "Quatro", status: "WARNING", message: "m" },
+          ],
+        }}
+        onPrepare={noop}
+        onDiagnostics={noop}
+      />,
+    );
+
+    expect(screen.getByText("Pronto")).toBeInTheDocument();
+    expect(screen.getByText("Falhou")).toBeInTheDocument();
+    expect(screen.getByText("Aguardando")).toBeInTheDocument();
+    expect(screen.getByText("Atenção")).toBeInTheDocument();
+    expect(screen.queryByText("ERROR")).not.toBeInTheDocument();
+  });
+});
