@@ -28,3 +28,16 @@ export function statusTone(status: string): "success" | "warning" | "danger" | "
   }
   return "neutral";
 }
+
+/** O aplicativo e em portugues; a tela mostrava OK / ERROR / PENDING cru. */
+export function statusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    ok: "Pronto",
+    error: "Falhou",
+    erro: "Falhou",
+    warning: "Atenção",
+    pending: "Aguardando",
+    running: "Em andamento",
+  };
+  return labels[status.toLowerCase()] ?? status;
+}

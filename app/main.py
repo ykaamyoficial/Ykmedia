@@ -35,6 +35,13 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         get_session_expiry_notifier,
     )
 
+    # A porta da Evolution pode ter sido trocada num preparo anterior (o Windows
+    # reserva faixas de portas e a faixa muda a cada reinicio). Sem realinhar
+    # aqui, o backend volta apontando para a 8080 e tudo parece offline.
+    from app.services.environment_manager import EnvironmentManager
+
+    EnvironmentManager().sync_settings_from_runtime()
+
     workers = []
     if settings.QUEUE_RETRY_WORKER_ENABLED:
         workers.append(get_queue_retry_worker())
