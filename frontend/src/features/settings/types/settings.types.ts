@@ -42,6 +42,13 @@ export const setupStepSchema = z.object({
   action: z.string().optional(),
 });
 
+export const setupProgressSchema = z.object({
+  running: z.boolean(),
+  status: z.string(),
+  message: z.string(),
+  steps: z.array(setupStepSchema),
+});
+
 export const setupReportSchema = z.object({
   status: z.string(),
   message: z.string(),
@@ -52,6 +59,7 @@ export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type EvolutionSession = z.infer<typeof evolutionSessionSchema>;
 export type DiagnosticReport = z.infer<typeof diagnosticReportSchema>;
 export type SetupReport = z.infer<typeof setupReportSchema>;
+export type SetupProgress = z.infer<typeof setupProgressSchema>;
 
 export const evolutionLicenseSchema = z.object({
   status: z.string(),

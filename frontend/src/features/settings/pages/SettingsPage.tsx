@@ -16,6 +16,7 @@ import {
   type SettingsNavItem,
   type SettingsSectionId,
   SimpleSettingsPanel,
+  FirstRunGuide,
   SystemSettingsPanel,
   WhatsAppSettingsPanel,
 } from "@/features/settings/components";
@@ -27,6 +28,7 @@ import {
   useEvolutionSession,
   useWhatsAppPairing,
   usePrepareSystem,
+  useSetupProgress,
   useRunDiagnostics,
   useSaveSettings,
   useSettings,
@@ -96,6 +98,11 @@ export function SettingsPage() {
   const connectMutation = useConnectEvolutionSession();
   const disconnectMutation = useDisconnectEvolutionSession();
   const prepareMutation = usePrepareSystem();
+  const setupProgress = useSetupProgress(prepareMutation.isPending);
+  // Se a licenca respondeu alguma coisa, a Evolution esta no ar -- ou seja, os
+  // containers subiram. E o sinal mais direto de que o ambiente esta pronto.
+  const licenseStatus = licenseQuery.data?.status;
+  const environmentReady = licenseStatus !== undefined && licenseStatus !== "INDISPONIVEL";
   const diagnosticsMutation = useRunDiagnostics();
   const [selectedId, setSelectedId] = useState<SettingsSectionId>("system");
   const [draft, setDraft] = useState<AppSettings>(emptySettings);
@@ -229,14 +236,27 @@ export function SettingsPage() {
     }
 
     return (
-      <SystemSettingsPanel
-        diagnostic={diagnosticsMutation.data}
+      <div className="space-y-4">
+        {/* Numa maquina nova, o caminho obrigatorio vem antes dos detalhes. */}
+        <FirstRunGuide
+          environmentReady={environmentReady}
+          licenseActive={licenseStatus === "ATIVA" || licenseStatus === "NAO_EXIGIDA"}
+          whatsappConnected={evolutionSession.state === "open"}
+          preparing={prepareMutation.isPending}
+          onPrepare={prepareSystemAction}
+        />
+        <SystemSettingsPanel
+          diagnostic={diagnosticsMutation.data}
         setup={prepareMutation.data}
+        // Enquanto o preparo corre, as etapas vem do progresso ao vivo: o POST
+        // so responde no fim, e o fim pode levar minutos.
+        progress={setupProgress}
         loading={actionLoading}
         preparing={prepareMutation.isPending}
-        onPrepare={prepareSystemAction}
-        onDiagnostics={runDiagnosticsAction}
-      />
+          onPrepare={prepareSystemAction}
+          onDiagnostics={runDiagnosticsAction}
+        />
+      </div>
     );
   }
 

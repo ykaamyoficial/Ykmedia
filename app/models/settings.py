@@ -49,6 +49,15 @@ class SetupStepResponse(BaseModel):
     action: str = ""
 
 
+class SetupProgressResponse(BaseModel):
+    """Instantaneo do preparo em curso, consultado pela tela a cada segundo."""
+
+    running: bool
+    status: str
+    message: str
+    steps: list["SetupStepResponse"]
+
+
 class SetupReportResponse(BaseModel):
     status: str
     message: str

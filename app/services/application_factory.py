@@ -36,6 +36,7 @@ from app.services.queue_retry_worker import QueueRetryWorker, WebhookJobReproces
 from app.services.session_expiry_notifier import SessionExpiryNotifier
 from app.services.receive_media_use_case import ReceiveMediaUseCase
 from app.services.session_store import SQLiteSessionStore
+from app.services.setup_progress import SetupProgressStore
 from app.services.settings_query_service import SettingsQueryService
 from app.services.storage_service import StorageService
 from app.services.system_startup_coordinator import SystemStartupCoordinator
@@ -238,6 +239,13 @@ def get_evolution_provisioning_manager() -> EvolutionProvisioningManager:
 
 
 @lru_cache(maxsize=1)
+@lru_cache(maxsize=1)
+def get_setup_progress_store() -> SetupProgressStore:
+    """Um unico store por processo: a rota de progresso e o preparo em curso
+    precisam olhar para o mesmo objeto."""
+    return SetupProgressStore()
+
+
 def get_automatic_setup_service() -> AutomaticSetupService:
     return AutomaticSetupService(
         configuration_manager=get_configuration_manager(),
@@ -250,6 +258,7 @@ def get_automatic_setup_service() -> AutomaticSetupService:
         # Grava o relatorio em logs/setup-report.json: sem isto ele so existe
         # enquanto a tela estiver aberta.
         runtime_root=get_environment_manager().runtime_root,
+        progress_store=get_setup_progress_store(),
     )
 
 
