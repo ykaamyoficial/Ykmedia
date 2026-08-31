@@ -52,7 +52,10 @@ export async function openExternalUrl(url: string) {
 
   if (isTauriRuntime()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_media_file", { path: url });
+    // Comando proprio para endereco web. `open_media_file` chama o Explorer,
+    // que descarta a query string: a URL de cadastro da licenca
+    // (?redirect_uri=...) abria a pasta Documentos em vez do navegador.
+    await invoke("open_external_url", { url });
     return;
   }
 

@@ -26,6 +26,47 @@ fn open_media_file(path: String) -> Result<(), String> {
     open_path(&path)
 }
 
+/// Aceita apenas endereco web.
+///
+/// Este comando abre coisas no computador do usuario a partir de um valor
+/// vindo da interface: restringir a http/https evita que um caminho local ou
+/// um esquema estranho chegue ao shell.
+fn is_web_url(url: &str) -> bool {
+    if url.contains('\r') || url.contains('\n') {
+        return false;
+    }
+
+    let lowered = url.to_ascii_lowercase();
+    lowered.starts_with("http://") || lowered.starts_with("https://")
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !is_web_url(&url) {
+        return Err(format!("Endereco web invalido: {url}"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer <url>` era o que estava em uso e nao funciona com endereco
+        // que tem query string: o Explorer descartava a URL de cadastro
+        // (?redirect_uri=...) e abria a pasta Documentos. `FileProtocolHandler`
+        // entrega a URL ao navegador padrao sem passar por shell nenhum, entao
+        // `?` e `&` chegam intactos.
+        Command::new("rundll32.exe")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        open_path(&url)
+    }
+}
+
 fn read_api_token() -> Option<String> {
     let token_file = runtime_root().ok()?.join("data").join("api_token");
     let content = fs::read_to_string(token_file).ok()?;
@@ -117,6 +158,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_media_file,
+            open_external_url,
             reveal_media_file,
             api_token
         ])
@@ -299,4 +341,35 @@ fn request_system_preparation() -> std::io::Result<()> {
     Err(std::io::Error::other(format!(
         "backend rejected the automatic preparation request ({status})"
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_web_url;
+
+    #[test]
+    fn accepts_the_registration_url_with_its_query_string() {
+        // Era o caso real: a URL de cadastro carrega ?redirect_uri=... e o
+        // Explorer, que recebia esse valor, ignorava tudo e abria a pasta
+        // Documentos em vez do navegador.
+        assert!(is_web_url(
+            "http://localhost:8090/license/register?redirect_uri=http%3A%2F%2Flocalhost%3A8090"
+        ));
+        assert!(is_web_url("https://evolution-api.com/license"));
+    }
+
+    #[test]
+    fn rejects_anything_that_is_not_a_web_address() {
+        // Este comando abre coisas no computador do usuario: so endereco web.
+        assert!(!is_web_url("file:///C:/Windows/System32"));
+        assert!(!is_web_url(r"C:\Windows\System32\cmd.exe"));
+        assert!(!is_web_url("javascript:alert(1)"));
+        assert!(!is_web_url(""));
+    }
+
+    #[test]
+    fn rejects_urls_carrying_line_breaks() {
+        // Quebras de linha permitiriam anexar um segundo comando.
+        assert!(!is_web_url("http://exemplo.com\r\noutra-coisa"));
+    }
 }
